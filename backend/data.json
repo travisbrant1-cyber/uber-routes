@@ -1,0 +1,44 @@
+{
+  "routes": [
+    {
+      "name": "Work",
+      "dropoff": {
+        "lat": 40.7505,
+        "lng": -73.9935,
+        "addr": "Penn Station, New York, NY"
+      },
+      "pickup": {
+        "lat": 40.7525,
+        "lng": -74.0064,
+        "addr": "636 W 28th St, New York, NY"
+      },
+      "id": "e27f1774-7dbc-4cc0-96ae-15df75917472",
+      "aliases": []
+    }
+  ],
+  "guests": [
+    {
+      "name": "Josh",
+      "phone_number": "+14155550000",
+      "email": "josh@example.com",
+      "consent": true,
+      "first_name": "Josh",
+      "last_name": "",
+      "id": "1fe0251c-bb33-4dff-a755-c29621689a1c"
+    },
+    {
+      "name": "NoConsent",
+      "phone_number": "+14155550099",
+      "consent": false,
+      "id": "7ed28db7-79d3-4e83-985f-2c13a9af637f"
+    },
+    {
+      "name": "Josh",
+      "phone_number": "+14155550000",
+      "consent": true,
+      "first_name": "Josh",
+      "last_name": "",
+      "id": "8420f4c4-f41e-46ff-8c11-3b0ede46cccf"
+    }
+  ]
+}

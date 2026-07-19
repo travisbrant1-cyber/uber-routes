@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Uber Routes</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:240px; height:282px; overflow:hidden; background:#0b0d10; color:#f4f6f8;
+    font-family:-apple-system,Segoe UI,Roboto,sans-serif; font-size:13px; }
+  #app { width:240px; height:282px; display:flex; flex-direction:column; }
+  header { padding:6px 8px; font-size:11px; letter-spacing:.04em; color:#9aa4ad;
+    border-bottom:1px solid #1c2127; display:flex; justify-content:space-between; align-items:center;
+    gap:6px; white-space:nowrap; overflow:hidden; }
+  header span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  header span:first-child { flex-shrink:0; }
+  header b { color:#fff; }
+  #view { flex:1; overflow:hidden; position:relative; }
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; }
+  .list { flex:1; overflow-y:auto; }
+  .row { padding:9px 10px; border-bottom:1px solid #161b21; min-height:44px;
+    display:flex; flex-direction:column; justify-content:center; }
+  .row:active { background:#161b21; }
+  .row .t { font-size:14px; color:#fff; }
+  .row .s { font-size:11px; color:#7f8a93; margin-top:2px; }
+  .row .x { float:right; color:#ff5b5b; font-size:12px; }
+  .hint { padding:6px 10px; font-size:11px; color:#7f8a93; text-align:center; }
+  .bar { padding:6px; text-align:center; font-size:11px; color:#9aa4ad; border-top:1px solid #1c2127; }
+  .bar:active { background:#161b21; }
+  .bar.go { color:#3ddc84; }
+  .bar.no { color:#ff5b5b; }
+  .barrow { display:flex; }
+  .barrow .bar { flex:1; }
+  .barrow .bar + .bar { border-left:1px solid #1c2127; }
+  .center { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:6px 10px; gap:5px; min-height:0; }
+  .big { font-size:15px; text-align:center; line-height:1.3; }
+  .muted { font-size:11px; color:#7f8a93; text-align:center; }
+  .ok { color:#3ddc84; } .warn{ color:#ffb020; } .bad{ color:#ff5b5b; }
+  .pill { display:inline-block; font-size:10px; padding:1px 6px; border-radius:999px; background:#1d2530; color:#9aa4ad; margin:2px; }
+  #qr { width:150px; height:150px; background:#fff; border-radius:6px; padding:6px; }
+  #qr img, #qr canvas { width:138px; height:138px; display:block; }
+  .stepline { display:flex; justify-content:center; gap:4px; padding:4px; }
+  .dot { width:6px; height:6px; border-radius:50%; background:#2a3138; }
+  .dot.on { background:#3ddc84; }
+  .stepline .lbl { font-size:10px; color:#7f8a93; margin-left:6px; align-self:center; }
+  .toast { position:absolute; left:0; right:0; bottom:0; padding:8px; background:#11151a;
+    border-top:1px solid #1c2127; font-size:11px; text-align:center; color:#cfd6dc; }
+  .field { margin:8px 10px; }
+  .field input { width:100%; padding:10px; border:1px solid #2a3138; border-radius:8px;
+    background:#11151a; color:#fff; font-size:13px; box-sizing:border-box; }
+  .marquee { width:100%; height:20px; overflow:hidden; white-space:nowrap; flex-shrink:0; }
+  .marquee .big { display:inline-block; white-space:nowrap; line-height:20px; }
+  .marquee.scroll .big { animation: marqueeSlide 6s ease-in-out infinite alternate; }
+  @keyframes marqueeSlide { from { transform:translateX(0); } to { transform:translateX(var(--scrollDist, 0px)); } }
+</style>
+</head>
+<body>
+<div id="app">
+  <header><span>UBER ROUTES</span><span id="mode">…</span></header>
+  <div id="view">
+
+    <!-- HOME -->
+    <div class="screen" id="home">
+      <div class="hint">Tap a saved place for a quick self-ride · or build one</div>
+      <div class="list" id="routeList"></div>
+      <div class="bar go" id="newRide">＋ NEW RIDE</div>
+    </div>
+
+    <!-- WHO -->
+    <div class="screen" id="who" style="display:none">
+      <div class="stepline"><span class="dot on"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="lbl">Who's riding?</span></div>
+      <div class="list" id="whoList"></div>
+      <div class="bar" id="whoBack">◀ back</div>
+    </div>
+
+    <!-- PICKUP -->
+    <div class="screen" id="pickup" style="display:none">
+      <div class="stepline"><span class="dot on"></span><span class="dot on"></span><span class="dot"></span><span class="dot"></span><span class="lbl">Pickup?</span></div>
+      <div class="list" id="pickupList"></div>
+      <div class="bar go" id="pickupNext">NEXT ▶</div>
+    </div>
+
+    <!-- WHERE (stops) -->
+    <div class="screen" id="where" style="display:none">
+      <div class="stepline"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot"></span><span class="lbl">Where to?</span></div>
+      <div class="list" id="stopList"></div>
+      <div class="bar go" id="whereNext">NEXT ▶</div>
+    </div>
+
+    <!-- TYPE ADDRESS -->
+    <div class="screen" id="typeAddr" style="display:none">
+      <div class="hint" id="typeAddrHint">Type the destination</div>
+      <div class="field"><input id="addrInput" type="text" placeholder="e.g. Penn Station, NY" autocomplete="off"></div>
+      <div class="bar go" id="addrAdd">✓ USE</div>
+      <div class="bar" id="typeBack">◀ back</div>
+    </div>
+
+    <!-- ADDRESS PREVIEW (after voice, typed, or GPS) -->
+    <div class="screen" id="addrPreview" style="display:none">
+      <div class="center">
+        <div class="muted">Did you mean</div>
+        <div class="big" id="addrPreviewText"></div>
+      </div>
+      <div class="bar go" id="addrOk">✓ ADD STOP</div>
+      <div class="bar" id="addrSave">💾 Save address</div>
+      <div class="bar no" id="addrRetry">✗ retry</div>
+    </div>
+
+    <!-- WHEN -->
+    <div class="screen" id="when" style="display:none">
+      <div class="stepline"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="lbl">When?</span></div>
+      <div class="list" id="whenList"></div>
+      <div class="bar" id="whenBack">◀ back</div>
+    </div>
+
+    <!-- CONFIRM -->
+    <div class="screen" id="confirm" style="display:none">
+      <div class="center">
+        <div class="big" id="confirmWho"></div>
+        <div class="marquee" id="confirmAddrWrap"><div class="big" id="confirmAddr"></div></div>
+        <div class="muted" id="confirmWhen"></div>
+      </div>
+      <div class="bar go" id="confirmBar">REQUEST ▶</div>
+    </div>
+
+    <!-- QR -->
+    <div class="screen" id="qrview" style="display:none">
+      <div class="center">
+        <div class="marquee" id="qrTitleWrap"><div class="big" id="qrTitle"></div></div>
+        <div id="qr"></div>
+        <div class="muted" id="qrNote">Scan with your phone camera<br>Uber opens prefilled · you tap confirm</div>
+      </div>
+      <div class="barrow">
+        <div class="bar go" id="qrHome" style="display:none">🏠 Ride home</div>
+        <div class="bar" id="qrBack">◀ home</div>
+      </div>
+    </div>
+
+  </div>
+  <div class="toast" id="toast" style="display:none"></div>
+</div>
+
+<script src="qrcode.js"></script>
+<script>
+var HAS = { msg: typeof PluginMessageHandler !== 'undefined', store: !!(window.creationStorage && window.creationStorage.plain) };
+var BACKEND = location.origin;
+var routes = [], guests = [], CLIENT_ID = '';
+
+// intake state collected by the form
+var intake = { riderType:'me', rider:null, stops:[], when:null, pickup:null };
+var expect = null;        // null | 'phrase' | 'address' | 'time'
+var pendingStop = null;   // stop awaiting confirmation in addrPreview
+var addrTarget = 'stop';  // 'stop' | 'pickup' -- which field typeAddr/addrPreview/say write into
+
+// ---------- storage ----------
+function loadRoutes(){ if(!HAS.store) return Promise.resolve();
+  return window.creationStorage.plain.getItem('routes').then(function(b){ if(b){try{routes=JSON.parse(atob(b));}catch(e){}} }); }
+function loadGuests(){ if(!HAS.store) return Promise.resolve();
+  return window.creationStorage.plain.getItem('guests').then(function(b){ if(b){try{guests=JSON.parse(atob(b));}catch(e){}} }); }
+function syncFromBackend(){
+  return fetch(BACKEND+'/config').then(function(r){return r.json();}).then(function(c){ CLIENT_ID=c.clientId||''; document.getElementById('mode').textContent='online'; })
+    .catch(function(){ document.getElementById('mode').textContent='offline'; })
+    .then(function(){ return fetch(BACKEND+'/routes'); }).then(function(r){return r.json();}).then(function(d){
+      routes=d.routes||[]; guests=d.guests||[];
+      if(HAS.store){ window.creationStorage.plain.setItem('routes',btoa(JSON.stringify(routes)));
+        window.creationStorage.plain.setItem('guests',btoa(JSON.stringify(guests))); }
+    }).catch(function(){});
+}
+
+// ---------- screens ----------
+var SCREENS=['home','who','pickup','where','typeAddr','addrPreview','when','confirm','qrview'];
+function show(id){ SCREENS.forEach(function(s){ document.getElementById(s).style.display=(s===id)?'flex':'none'; });
+  if(id==='home'){ expect=null; pendingStop=null; } }
+function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.display='block';
+  clearTimeout(toast._t); toast._t=setTimeout(function(){t.style.display='none';},2400); }
+function visId(){ var v=document.querySelector('.screen[style*="flex"]'); return v?v.id:null; }
+
+// ---------- HOME ----------
+function renderHome(){
+  var el=document.getElementById('routeList'); el.innerHTML='';
+  if(!routes.length){ el.innerHTML='<div class="row"><div class="s">No saved places. Add them in the phone setup page.</div></div>'; return; }
+  routes.forEach(function(r){ var d=document.createElement('div'); d.className='row';
+    d.innerHTML='<div class="t">'+esc(r.name)+'</div><div class="s">'+esc(shortAddr(r.dropoff.addr))+'</div>';
+    d.addEventListener('click',function(){ quickSelf(r); }); el.appendChild(d); });
+}
+function quickSelf(r){
+  intake={ riderType:'me', rider:null, stops:[{lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}],
+    pickup:(r.pickup&&r.pickup.lat)?{lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}:null, when:null };
+  showRideLink();
+}
+
+// ---------- WHO ----------
+function startWizard(){ expect=null; pendingStop=null;
+  intake={ riderType:'me', rider:null, stops:[], when:null, pickup:null };
+  var el=document.getElementById('whoList'); el.innerHTML='';
+  var me=document.createElement('div'); me.className='row';
+  me.innerHTML='<div class="t">🙂 Me</div><div class="s">ride from my location, I confirm in app</div>';
+  me.addEventListener('click',function(){ intake.riderType='me'; intake.rider=null; goPickup(); }); el.appendChild(me);
+  guests.forEach(function(g){ var d=document.createElement('div'); d.className='row';
+    d.innerHTML='<div class="t">'+esc(g.name)+'</div><div class="s">'+esc(g.phone_number||'')+(g.consent?' · SMS ✓':' · NO consent')+'</div>';
+    d.addEventListener('click',function(){ if(!g.consent){ toast('needs SMS consent first'); return; }
+      intake.riderType='guest'; intake.rider=g; goPickup(); }); el.appendChild(d); });
+  var np=document.createElement('div'); np.className='row';
+  np.innerHTML='<div class="t">＋ Someone new</div><div class="s">enter a phone (needs consent)</div>';
+  np.addEventListener('click',function(){ newPerson(); }); el.appendChild(np);
+  show('who');
+}
+function newPerson(){
+  var name=prompt('Person\'s name:'); if(!name) return;
+  var phone=prompt('Phone (+country code):'); if(!phone) return;
+  if(!confirm('Confirm you have this person\'s consent to receive Uber SMS?')) return;
+  var parts=name.trim().split(' ');
+  var g={ name:name.trim(), phone_number:phone.trim(), consent:true, first_name:parts[0], last_name:parts.slice(1).join(' ') };
+  if(HAS.store) window.creationStorage.plain.setItem('guests',btoa(JSON.stringify(guests.concat(g))));
+  fetch(BACKEND+'/routes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guest:g})}).catch(function(){});
+  guests.push(g); intake.riderType='guest'; intake.rider=g; goPickup();
+}
+
+// ---------- PICKUP ----------
+function goPickup(){ renderPickup(); show('pickup'); }
+function renderPickup(){
+  var el=document.getElementById('pickupList'); el.innerHTML='';
+  if(intake.pickup){
+    var cur=document.createElement('div'); cur.className='row';
+    cur.innerHTML='<div class="t">📍 '+esc(shortAddr(intake.pickup.addr))+'</div><div class="s"><span class="x">change</span></div>';
+    cur.querySelector('.x').addEventListener('click',function(e){ e.stopPropagation(); intake.pickup=null; renderPickup(); });
+    el.appendChild(cur);
+  }
+  var loc=document.createElement('div'); loc.className='row';
+  loc.innerHTML='<div class="t">📍 Use current location</div><div class="s">GPS, reverse-geocoded to an address</div>';
+  loc.addEventListener('click',function(){ useCurrentLocation(); }); el.appendChild(loc);
+  routes.filter(function(r){ return r.pickup && r.pickup.lat; }).forEach(function(r){
+    var d=document.createElement('div'); d.className='row';
+    d.innerHTML='<div class="t">'+esc(r.name)+' pickup</div><div class="s">'+esc(shortAddr(r.pickup.addr))+'</div>';
+    d.addEventListener('click',function(){ intake.pickup={lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}; renderPickup(); }); el.appendChild(d);
+  });
+  var type=document.createElement('div'); type.className='row';
+  type.innerHTML='<div class="t">⌨️ Type address</div>';
+  type.addEventListener('click',function(){ addrTarget='pickup'; document.getElementById('typeAddrHint').textContent='Type the pickup address';
+    document.getElementById('addrInput').value=''; show('typeAddr'); }); el.appendChild(type);
+  var say=document.createElement('div'); say.className='row';
+  say.innerHTML='<div class="t">🎤 Say address</div>';
+  say.addEventListener('click',function(){ addrTarget='pickup'; sayAddress(); }); el.appendChild(say);
+  var next=document.getElementById('pickupNext');
+  var required = intake.riderType==='guest';
+  if(intake.pickup){ next.textContent='NEXT ▶'; next.className='bar go'; }
+  else if(required){ next.textContent='add a pickup address above'; next.className='bar no'; }
+  else { next.textContent='SKIP (Uber uses your GPS) ▶'; next.className='bar go'; }
+}
+function pickupCanProceed(){ return !!intake.pickup || intake.riderType!=='guest'; }
+function useCurrentLocation(){
+  if(!navigator.geolocation){ toast('location not available — try typing it'); return; }
+  toast('locating…');
+  navigator.geolocation.getCurrentPosition(function(pos){
+    var lat=pos.coords.latitude, lng=pos.coords.longitude;
+    fetch(BACKEND+'/reverse-geocode?lat='+lat+'&lng='+lng).then(function(r){return r.json();}).then(function(j){
+      addrTarget='pickup'; pendingStop={lat:lat,lng:lng,addr:(j.addr||'current location')};
+      document.getElementById('addrPreviewText').textContent=pendingStop.addr;
+      document.getElementById('addrOk').textContent='✓ SET PICKUP';
+      show('addrPreview');
+    }).catch(function(){
+      addrTarget='pickup'; pendingStop={lat:lat,lng:lng,addr:'current location ('+lat.toFixed(4)+', '+lng.toFixed(4)+')'};
+      document.getElementById('addrPreviewText').textContent=pendingStop.addr;
+      document.getElementById('addrOk').textContent='✓ SET PICKUP';
+      show('addrPreview');
+    });
+  }, function(){ toast('location denied/unavailable — try typing it'); }, { timeout:8000, maximumAge:60000 });
+}
+
+// ---------- WHERE ----------
+function goWhere(){ renderStops(); show('where'); }
+function renderStops(){
+  var el=document.getElementById('stopList'); el.innerHTML='';
+  intake.stops.forEach(function(s,i){ var d=document.createElement('div'); d.className='row';
+    d.innerHTML='<div class="t">📍 Stop '+(i+1)+': '+esc(shortAddr(s.addr))+'</div><div class="s"><span class="x">remove</span></div>';
+    d.querySelector('.x').addEventListener('click',function(e){ e.stopPropagation(); intake.stops.splice(i,1); renderStops(); });
+    el.appendChild(d); });
+  var addRoute=document.createElement('div'); addRoute.className='row';
+  addRoute.innerHTML='<div class="t">＋ Saved place</div>';
+  addRoute.addEventListener('click',function(){ pickRoute(); }); el.appendChild(addRoute);
+  var type=document.createElement('div'); type.className='row';
+  type.innerHTML='<div class="t">⌨️ Type address</div>';
+  type.addEventListener('click',function(){ addrTarget='stop'; document.getElementById('typeAddrHint').textContent='Type the destination';
+    document.getElementById('addrInput').value=''; show('typeAddr'); }); el.appendChild(type);
+  var say=document.createElement('div'); say.className='row';
+  say.innerHTML='<div class="t">🎤 Say address</div>';
+  say.addEventListener('click',function(){ addrTarget='stop'; sayAddress(); }); el.appendChild(say);
+  var next=document.getElementById('whereNext');
+  next.textContent = intake.stops.length ? 'NEXT ▶' : 'add a destination above';
+  next.className = intake.stops.length ? 'bar go' : 'bar no';
+}
+function pickRoute(){
+  var el=document.getElementById('stopList'); var prev=el.innerHTML;
+  el.innerHTML=''; var back=document.createElement('div'); back.className='row';
+  back.innerHTML='<div class="s">◀ back to stops</div>'; back.addEventListener('click',function(){ renderStops(); }); el.appendChild(back);
+  routes.forEach(function(r){ var d=document.createElement('div'); d.className='row';
+    d.innerHTML='<div class="t">'+esc(r.name)+'</div><div class="s">'+esc(shortAddr(r.dropoff.addr))+'</div>';
+    d.addEventListener('click',function(){ intake.stops.push({lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}); renderStops(); }); el.appendChild(d); });
+}
+
+// typed address -> geocode -> preview
+function typeAddrGo(){ var v=document.getElementById('addrInput').value.trim(); if(!v){ toast('type something'); return; } geocodeThenPreview(v); }
+// voice address: ask LLM to echo the address they said
+function sayAddress(){
+  if(!HAS.msg){ expect='address'; var a=prompt('Address:'); if(a) geocodeThenPreview(a); return; }
+  startVoice('address');
+  toast('speak the address…');
+  PluginMessageHandler.postMessage(JSON.stringify({ message:"The user is about to say a destination. Reply with ONLY the raw address text they say, nothing else.", useLLM:true, wantsR1Response:false }));
+}
+function geocodeThenPreview(q){
+  fetch(BACKEND+'/geocode?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(j){
+    if(j.error) throw new Error(j.error);
+    pendingStop={lat:j.lat,lng:j.lng,addr:(j.addr||q)};
+    // a confident match (exact street address, or a well-known place) skips the "did you
+    // mean" screen entirely and goes straight to adding it -- only fuzzy matches need review
+    if(j.confident){
+      toast((addrTarget==='pickup'?'📍 pickup set: ':'📍 added: ')+shortAddr(pendingStop.addr));
+      addrConfirm();
+      return;
+    }
+    document.getElementById('addrPreviewText').textContent=pendingStop.addr;
+    document.getElementById('addrOk').textContent = addrTarget==='pickup' ? '✓ SET PICKUP' : '✓ ADD STOP';
+    show('addrPreview');
+  }).catch(function(e){ toast('could not find: '+e.message); show(addrTarget==='pickup' ? 'pickup' : 'where'); });
+}
+function addrBackScreen(){ return addrTarget==='pickup' ? 'pickup' : 'where'; }
+function addrConfirm(){
+  if(!pendingStop) return;
+  if(addrTarget==='pickup'){ intake.pickup=pendingStop; pendingStop=null; renderPickup(); show('pickup'); }
+  else { intake.stops.push(pendingStop); pendingStop=null; renderStops(); show('where'); }
+}
+function addrSaveAsRoute(){
+  if(!pendingStop) return;
+  var name=prompt('Save this place as (e.g. "Home", "Work"):'); if(!name) return;
+  var aliasStr=prompt('Any other names for this place? (comma-separated, optional):')||'';
+  var aliases=aliasStr.split(',').map(function(s){return s.trim();}).filter(Boolean);
+  var route={ name:name.trim(), aliases:aliases, dropoff:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr},
+    pickup:(intake.pickup&&intake.pickup.lat)?{lat:intake.pickup.lat,lng:intake.pickup.lng,addr:intake.pickup.addr}:{lat:null,lng:null,addr:'my current location'} };
+  routes.push(route);
+  renderHome();
+  if(HAS.store) window.creationStorage.plain.setItem('routes',btoa(JSON.stringify(routes)));
+  fetch(BACKEND+'/routes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({route:route})}).catch(function(){});
+  toast('saved as "'+route.name+'"');
+  addrConfirm();
+}
+
+// ---------- WHEN ----------
+function goWhen(){ var el=document.getElementById('whenList'); el.innerHTML='';
+  var opts=[ {t:'🚕 Now', when:null},
+    {t:'+30 minutes', when:Date.now()+30*60000},
+    {t:'+1 hour', when:Date.now()+60*60000},
+    {t:'Tomorrow 8:00 AM', when:tomorrowAt(8,0)},
+    {t:'🎤 Say a time', when:'say'} ];
+  opts.forEach(function(o){ var d=document.createElement('div'); d.className='row';
+    d.innerHTML='<div class="t">'+o.t+'</div>';
+    d.addEventListener('click',function(){ if(o.when==='say'){ sayTime(); } else { intake.when=o.when; goConfirm(); } });
+    el.appendChild(d); });
+  show('when');
+}
+function tomorrowAt(h,m){ var d=new Date(); d.setDate(d.getDate()+1); d.setHours(h,m,0,0); return d.getTime(); }
+function sayTime(){
+  if(!HAS.msg){ expect='time'; var t=prompt('When? (e.g. "friday 5pm")'); if(t) parseTime(t); return; }
+  startVoice('time');
+  toast('speak the time…');
+  PluginMessageHandler.postMessage(JSON.stringify({ message:"The user will say a time. Convert it to epoch milliseconds and reply with ONLY that number, nothing else.", useLLM:true, wantsR1Response:false }));
+}
+function parseTime(phrase){
+  if(!HAS.msg){ var m=phrase.match(/(\d{1,2})\s*(am|pm)?/i); var h=m?parseInt(m[1]):8; if(m&&/pm/i.test(m[2])&&h<12)h+=12;
+    intake.when=tomorrowAt(h,0); goConfirm(); return; }
+  // device: LLM handled in onPluginMessage (expect==='time')
+}
+
+// ---------- CONFIRM ----------
+function goConfirm(){
+  if(!intake.stops.length){ toast('add a destination first'); show('where'); return; }
+  var who = intake.riderType==='guest' ? esc(intake.rider.name) : 'me';
+  document.getElementById('confirmWho').innerHTML='Take <b>'+who+'</b> to'
+    + (intake.stops.length>1?' <span class="pill">+'+(intake.stops.length-1)+' stop</span>':'');
+  document.getElementById('confirmAddr').textContent = shortAddr(intake.stops[intake.stops.length-1].addr);
+  document.getElementById('confirmWhen').innerHTML = (intake.when ? '📅 '+new Date(intake.when).toLocaleString() : '🚕 now')
+    + (intake.pickup ? '<br>📍 from '+esc(shortAddr(intake.pickup.addr)) : '');
+  show('confirm');
+  fitMarquee('confirmAddrWrap','confirmAddr');
+}
+function doRequest(){ showRideLink(); }
+
+// ---------- RIDE LINK (client-side deeplink + QR, for both self and guest rides) ----------
+// Uber deep links have no parameter for "this ride is for someone else" or a recipient phone
+// number (verified against Uber's own deep-link docs) -- that's an in-app-only picker in the
+// consumer Uber app, and deep links also can't set a future pickup time (scheduling is API-only).
+// So a guest/scheduled ride still gets a QR built the same way as a self-ride; it just carries a
+// reminder for the one or two things you have to set manually once the Uber app opens.
+function showRideLink(){
+  var link=buildSelfLink(intake.stops, intake.pickup);
+  var dest=shortAddr(intake.stops[intake.stops.length-1].addr);
+  document.getElementById('qrTitle').textContent = intake.riderType==='guest' ? 'Ride to '+dest+' for '+intake.rider.name : 'Ride to '+dest;
+  var box=document.getElementById('qr'); box.innerHTML='';
+  try { var q=window.qrcode(0,'M'); q.addData(link); q.make(); box.innerHTML=q.createImgTag(4,6); }
+  catch(e){ box.innerHTML='<div class="muted" style="color:#000">qr lib missing</div>'; }
+  var note = document.getElementById('qrNote');
+  if(intake.riderType==='guest'){ note.innerHTML='Scan, then in Uber pick <b>'+esc(intake.rider.name)+'</b> as rider before confirming'; }
+  else if(intake.when){ note.innerHTML='Scan — links can\'t schedule, so set the time manually in Uber'; }
+  else { note.innerHTML='Scan with your phone camera<br>Uber opens prefilled · you tap confirm'; }
+  show('qrview');
+  fitMarquee('qrTitleWrap','qrTitle');
+  renderHomeShortcut('qrHome');
+}
+// long addresses must never push the QR code off the fixed 282px-tall screen -- keep the
+// title to a single line and scroll it horizontally only when it actually overflows
+function fitMarquee(wrapId, textId){
+  var wrap=document.getElementById(wrapId), text=document.getElementById(textId);
+  wrap.classList.remove('scroll'); text.style.removeProperty('--scrollDist');
+  var overflow = text.scrollWidth - wrap.clientWidth;
+  if(overflow > 2){ text.style.setProperty('--scrollDist', (-overflow-6)+'px'); wrap.classList.add('scroll'); }
+}
+function buildSelfLink(stops, pickup){
+  var pickupParam = (pickup && pickup.lat)
+    ? JSON.stringify({latitude:pickup.lat, longitude:pickup.lng, addressLine1:pickup.addr})
+    : 'my_location';
+  var u='https://m.uber.com/looking?pickup='+encodeURIComponent(pickupParam);
+  stops.forEach(function(s,i){ u+='&drop['+i+']='+encodeURIComponent(JSON.stringify({latitude:s.lat,longitude:s.lng,addressLine1:s.addr})); });
+  if(CLIENT_ID) u+='&client_id='+CLIENT_ID;
+  return u;
+}
+
+// ---------- LLM: full-phrase shortcut ----------
+// The LLM bridge (PluginMessageHandler) is known-unreliable on-device: it can silently
+// never call onPluginMessage back. Every voice request gets a hard timeout so the user
+// always lands somewhere usable instead of waiting forever on the same screen.
+var VOICE_TIMEOUT_MS = 12000;
+var voiceGen = 0;
+function startVoice(kind){
+  expect = kind;
+  var gen = ++voiceGen;
+  setTimeout(function(){
+    if(expect!==kind || voiceGen!==gen) return; // already resolved or superseded by a retry
+    expect=null;
+    if(kind==='address'){ toast('no response — try typing it'); show(addrBackScreen()); }
+    else if(kind==='time'){ toast('no response — pick a time below'); show('when'); }
+    else if(kind==='phrase'){ toast('no response — try the buttons'); }
+  }, VOICE_TIMEOUT_MS);
+}
+function askLLM(phrase){
+  if(!HAS.msg){ toast('LLM bridge unavailable'); return; }
+  startVoice('phrase');
+  var known='You are a ride dispatcher. Known routes: '+routes.map(function(r){return [r.name].concat(r.aliases||[]).join('/');}).join(', ')+'. '
+    +'Known people: '+guests.map(function(g){return g.name;}).join(', ')+'.\n'
+    +'Return ONLY JSON: {"route":string|null,"guest":string|null,"when":epoch ms or null}.\n'
+    +'guest=null if the ride is for the speaker. Parse times like "tomorrow 8am" to epoch ms.\n';
+  var prompt = phrase ? known+'Phrase: "'+phrase+'"' : known+'The user is about to say the phrase describing the ride they want.';
+  PluginMessageHandler.postMessage(JSON.stringify({ message:prompt, useLLM:true, wantsR1Response:false }));
+}
+window.onPluginMessage=function(data){
+  var raw=(data&&data.message)||'';
+  var dt=(data&&data.data)||'';
+  voiceGen++; // any real reply supersedes its timeout, and any timeout already in flight for it
+  // partial results from the wizard
+  if(expect==='address'){
+    var addr=(raw||'').trim() || (typeof dt==='string'?dt.trim():'');
+    if(!addr){ toast('didn\'t hear that'); expect=null; return; }
+    geocodeThenPreview(addr); expect=null; return;
+  }
+  if(expect==='time'){
+    var num=parseInt(String(raw||dt).replace(/[^0-9]/g,''),10);
+    if(!num){ toast('couldn\'t parse the time'); expect=null; return; }
+    intake.when=num; expect=null; goConfirm(); return;
+  }
+  // full-phrase shortcut
+  var parsed=null;
+  try{ parsed=JSON.parse(dt); }catch(e){ try{ parsed=JSON.parse(raw); }catch(_){} }
+  if(!parsed||(!parsed.route&&!parsed.guest)){ toast('didn\'t catch that'); expect=null; return; }
+  var route=routes.find(function(r){return routeMatchesName(r, parsed.route);});
+  if(!route){ toast('no route "'+parsed.route+'"'); expect=null; return; }
+  if(parsed.guest){
+    var g=guests.find(function(x){return x.name.toLowerCase()===String(parsed.guest).toLowerCase();});
+    if(!g){ toast('no person "'+parsed.guest+'"'); expect=null; return; }
+    if(!g.consent){ toast(g.name+' needs SMS consent'); expect=null; return; }
+    intake={ riderType:'guest', rider:g, stops:[{lat:route.dropoff.lat,lng:route.dropoff.lng,addr:route.dropoff.addr}],
+      pickup:(route.pickup&&route.pickup.lat)?{lat:route.pickup.lat,lng:route.pickup.lng,addr:route.pickup.addr}:null, when:parsed.when||null };
+    goConfirm();
+  } else { quickSelf(route); }
+  expect=null;
+};
+function sayPhrase(){ if(!HAS.msg){ var p=prompt('Say a phrase (e.g. "Take Josh to Work tomorrow 8am"):'); if(p) askLLM(p); return; } toast('speak now…'); askLLM(); }
+
+// ---------- hardware ----------
+window.addEventListener('scrollUp', function(){ document.querySelectorAll('.list').forEach(function(l){ if(l.offsetParent!==null) l.scrollTop-=44; }); });
+window.addEventListener('scrollDown', function(){ document.querySelectorAll('.list').forEach(function(l){ if(l.offsetParent!==null) l.scrollTop+=44; }); });
+window.addEventListener('sideClick', function(){
+  var v=visId(); if(!v) return;
+  if(v==='confirm') doRequest();
+  else if(v==='who') goPickup();
+  else if(v==='pickup'){ if(!pickupCanProceed()){ toast('add a pickup address first'); } else { goWhere(); } }
+  else if(v==='where'){ if(!intake.stops.length){ toast('add a destination first'); } else { goWhen(); } }
+  else if(v==='typeAddr') typeAddrGo();
+  else if(v==='when') goConfirm();
+  else if(v==='addrPreview') addrConfirm();
+  else if(v==='qrview') show('home');
+  else sayPhrase();
+});
+
+// ---------- nav ----------
+document.getElementById('newRide').addEventListener('click', startWizard);
+document.getElementById('whoBack').addEventListener('click', function(){ show('home'); });
+document.getElementById('whereNext').addEventListener('click', function(){
+  if(!intake.stops.length){ toast('add a destination first'); return; } goWhen(); });
+document.getElementById('typeBack').addEventListener('click', function(){ show(addrBackScreen()); });
+document.getElementById('addrInput').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); typeAddrGo(); } });
+document.getElementById('addrAdd').addEventListener('click', typeAddrGo);
+document.getElementById('addrOk').addEventListener('click', addrConfirm);
+document.getElementById('addrSave').addEventListener('click', addrSaveAsRoute);
+document.getElementById('addrRetry').addEventListener('click', function(){ show(addrBackScreen()); });
+document.getElementById('pickupNext').addEventListener('click', function(){
+  if(!pickupCanProceed()){ toast('add a pickup address first'); return; } goWhere(); });
+document.getElementById('whenBack').addEventListener('click', goWhere);
+document.getElementById('confirmBar').addEventListener('click', doRequest);
+document.getElementById('qrBack').addEventListener('click', function(){ show('home'); });
+
+// ---------- boot ----------
+function boot(){
+  syncFromBackend().then(loadRoutes).then(loadGuests).then(function(){
+    routes=routes||[]; guests=guests||[]; renderHome(); show('home');
+  });
+}
+boot();
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+// Nominatim addresses are verbose ("123, Main St, City, County, State, Zip, Country") --
+// keep only the house number + street name for display; the full address/lat/lng are
+// still what's actually used for geocoding and the Uber link.
+function shortAddr(addr){
+  if(!addr) return '';
+  var parts=String(addr).split(',').map(function(s){return s.trim();}).filter(Boolean);
+  if(!parts.length) return addr;
+  if(parts.length>=2 && /^\d/.test(parts[0])) return parts[0]+' '+parts[1];
+  return parts[0];
+}
+function renderHomeShortcut(barId){
+  var bar=document.getElementById(barId);
+  var home=routes.find(function(r){ return routeMatchesName(r,'home'); });
+  if(home){ bar.style.display='block'; bar.onclick=function(){ quickSelf(home); }; }
+  else { bar.style.display='none'; }
+}
+// name-or-alias match, case-insensitive -- lets a saved place answer to more than one name
+// ("Home" and "House" both trigger the same route) via voice, Home screen, or the Pickup list
+function routeMatchesName(route, name){
+  var n=String(name||'').trim().toLowerCase(); if(!n) return false;
+  if(route.name && route.name.toLowerCase()===n) return true;
+  return (route.aliases||[]).some(function(a){ return String(a).toLowerCase()===n; });
+}
+</script>
+</body>
+</html>
