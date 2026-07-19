@@ -120,6 +120,7 @@
       <div class="prog" id="progType"></div>
       <div class="hint" style="padding:6px 10px;font-size:10px;color:#8a8a8a;font-weight:bold;text-transform:uppercase">Type the destination</div>
       <div class="field"><input id="addrInput" type="text" placeholder="Penn Station, NY" autocomplete="off"></div>
+      <div class="list" id="typeAddrList" style="flex:none;overflow:hidden"></div>
       <div class="tip">ENTER ✓ · SWIPE ⟶ BACK</div>
     </div>
 
@@ -271,6 +272,7 @@ function show(id){
   });
   if(id!=='home' && WIZ.indexOf(id)>=0) setProg(WIZ.indexOf(id));
   if(id==='home'){ renderHome(); }   // re-render + re-register selection model (was clearing selItems, breaking scroll/PTT)
+  if(id==='typeAddr'){ renderTypeAddr(); }
 }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.display='block';
   clearTimeout(toast._t); toast._t=setTimeout(function(){t.style.display='none';},2200); }
@@ -356,6 +358,9 @@ function pickRoute(){
 
 // ---------- address input -> geocode -> preview ----------
 function typeAddrGo(){ var v=document.getElementById('addrInput').value.trim(); if(!v){ toast('type something'); return; } geocodeThenPreview(v, addrTarget); }
+function renderTypeAddr(){ var el=document.getElementById('typeAddrList'); el.innerHTML='';
+  el.appendChild(station({ letter:'✓', color:'#00933C', title:'Search', sub:'geocode this address', express:true, onClick:function(){ typeAddrGo(); } }));
+  registerList(collect(el)); }
 function sayAddress(){ expect='address'; if(!HAS.msg){ showPrompt('Destination', 'Address', function(a){ if(a) geocodeThenPreview(a,'stop'); }); return; } toast('speak the address…');
   PluginMessageHandler.postMessage(JSON.stringify({ message:"The user is about to say a destination. Reply with ONLY the raw address text they say, nothing else.", useLLM:true, wantsR1Response:false })); }
 function geocodeThenPreview(q, target){
@@ -374,7 +379,7 @@ function useCurrentLocation(){
     }).catch(function(){ intake.pickup={lat:pos.coords.latitude,lng:pos.coords.longitude,addr:'current location'}; renderPickup(); });
   }, function(err){
     var why = err && err.code===1 ? 'GPS permission denied' : err && err.code===2 ? 'GPS unavailable' : err && err.code===3 ? 'GPS timeout' : 'GPS denied';
-    toast(why); if(typeof DEBUG!=='undefined' && DEBUG) console.log('GPS', err && err.code, err && err.message);
+    toast(why + ' · use Type/Say'); if(typeof DEBUG!=='undefined' && DEBUG) console.log('GPS', err && err.code, err && err.message);
   });
 }
 function renderAddrPreview(){
@@ -561,7 +566,7 @@ window.addEventListener('wheel', function(e){ moveSelDebounced(e.deltaY<0?-1:1);
 window.addEventListener('sideClick', function(){
   var v=visId();
   if(v==='promptModal'){ confirmPrompt(); return; }
-  if(v==='typeAddr'){ typeAddrGo(); return; }
+  if(v==='typeAddr'){ activate(); return; }   // activate the selected "Search" row
   if(v==='confirm'){ doRequest(); return; }
   if(v==='qrview'){ show('home'); return; }
   if(selItems.length) activate();
