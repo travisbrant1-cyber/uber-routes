@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Uber Routes</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; }
+  html,body { width:240px; height:282px; overflow:hidden; background:#000; color:#fff;
+    font-family:Helvetica,Arial,sans-serif; font-size:13px; font-weight:bold; letter-spacing:.02em; }
+  #app { width:240px; height:282px; display:flex; flex-direction:column; }
+  /* ---- header: station sign ---- */
+  header { height:22px; flex-shrink:0; display:flex; align-items:center; justify-content:space-between;
+    padding:0 8px; background:#0a0a0a; border-bottom:3px solid #FCCC0A; }
+  header .sign { font-size:12px; letter-spacing:.12em; color:#fff; }
+  header .dot { width:7px; height:7px; border-radius:50%; background:#3ddc84; }
+  header .dot.off { background:#ff5b5b; }
+  /* ---- progress transit line ---- */
+  .prog { height:16px; flex-shrink:0; display:flex; align-items:center; padding:0 10px; background:#0a0a0a;
+    border-bottom:1px solid #161616; gap:0; overflow:hidden; }
+  .prog .seg { display:flex; align-items:center; }
+  .prog .pd { width:7px; height:7px; border-radius:50%; border:2px solid #444; background:#000; }
+  .prog .pd.done { background:#fff; border-color:#fff; }
+  .prog .pd.cur { background:#000; border-color:#fff; box-shadow:0 0 0 2px #fff; }
+  .prog .ln { width:18px; height:2px; background:#444; }
+  .prog .ln.done { background:#fff; }
+  .prog .pl { font-size:9px; letter-spacing:.08em; color:#888; margin-left:5px; text-transform:uppercase; }
+  .prog .pl.cur { color:#FCCC0A; }
+  /* ---- screens ---- */
+  #view { flex:1; overflow:hidden; position:relative; }
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; }
+  .list { flex:1; overflow-y:auto; padding:6px 0 6px 0; position:relative; }
+  /* ---- station row ---- */
+  .row { position:relative; min-height:42px; display:flex; align-items:center; padding:4px 10px 4px 38px; }
+  .row::before { content:""; position:absolute; left:21px; top:24px; bottom:0; width:2px; background:#2a2a2a; }
+  .row:first-child::before { top:24px; }
+  .row:last-child::before { bottom:18px; }
+  .bullet { position:absolute; left:11px; top:50%; transform:translateY(-50%); width:20px; height:20px;
+    border-radius:50%; background:#444; color:#fff; display:flex; align-items:center; justify-content:center;
+    font-size:11px; font-weight:bold; z-index:2; box-shadow:0 0 0 2px #000; }
+  .meta { display:flex; flex-direction:column; line-height:1.15; }
+  .meta .t { font-size:13px; color:#fff; text-transform:uppercase; letter-spacing:.03em; }
+  .meta .s { font-size:10px; color:#8a8a8a; font-weight:bold; margin-top:1px; text-transform:none; letter-spacing:0; }
+  .row.sel { background:#fff; box-shadow:inset 0 0 0 2px #000; }
+  .row.sel .meta .t { color:#000; }
+  .row.sel .meta .s { color:#444; }
+  .row.express .bullet { border-radius:4px; background:#00933C; color:#fff; transform:translateY(-50%) rotate(45deg); }
+  .row.express .bullet span { transform:rotate(-45deg); }
+  .row.disabled .meta .t { color:#555; }
+  .row.disabled .bullet { background:#222; color:#555; }
+  /* ---- generic screens ---- */
+  .center { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:10px; gap:8px; }
+  .big { font-size:15px; text-align:center; line-height:1.25; }
+  .muted { font-size:11px; color:#8a8a8a; text-align:center; font-weight:bold; }
+  .ok{color:#3ddc84;} .warn{color:#FCCC0A;} .bad{color:#ff5b5b;}
+  .pill { display:inline-block; font-size:10px; padding:1px 6px; border-radius:999px; background:#1d1d1d; color:#bbb; margin:2px; font-weight:bold; }
+  #qr { width:150px; height:150px; background:#fff; border-radius:4px; padding:6px; }
+  #qr img, #qr canvas { width:138px; height:138px; display:block; }
+  .marquee { width:100%; height:20px; overflow:hidden; white-space:nowrap; text-align:center; flex-shrink:0; }
+  .marquee .big { display:inline-block; white-space:nowrap; line-height:20px; }
+  .marquee.scroll .big { animation: slide 6s ease-in-out infinite alternate; }
+  @keyframes slide { from { transform:translateX(0); } to { transform:translateX(var(--sd,0px)); } }
+  .field { margin:8px 10px; }
+  .field input { width:100%; padding:10px; border:1px solid #2a2a2a; border-radius:6px; background:#0a0a0a;
+    color:#fff; font:bold 13px Helvetica,Arial; box-sizing:border-box; -webkit-user-select:text; user-select:text; }
+  .tip { height:14px; flex-shrink:0; text-align:center; font-size:9px; letter-spacing:.06em; color:#666;
+    background:#0a0a0a; border-top:1px solid #161616; text-transform:uppercase; line-height:14px; }
+  .toast { position:absolute; left:0; right:0; bottom:18px; padding:7px; background:#FCCC0A; color:#000;
+    font-size:11px; text-align:center; font-weight:bold; }
+  .poster { padding:10px; text-align:center; }
+  .poster .lbl { font-size:10px; color:#8a8a8a; letter-spacing:.1em; text-transform:uppercase; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header><span class="sign">UBER ROUTES</span><span class="dot" id="modeDot"></span></header>
+  <div id="view">
+
+    <!-- HOME -->
+    <div class="screen" id="home">
+      <div class="list" id="homeList"></div>
+      <div class="tip">SCROLL · ● SELECT · SAY A RIDE</div>
+    </div>
+
+    <!-- PICKUP -->
+    <div class="screen" id="pickup" style="display:none">
+      <div class="prog" id="progPickup"></div>
+      <div class="list" id="pickupList"></div>
+      <div class="tip">● SELECT · SWIPE ⟶ BACK</div>
+    </div>
+
+    <!-- WHERE -->
+    <div class="screen" id="where" style="display:none">
+      <div class="prog" id="progWhere"></div>
+      <div class="list" id="stopList"></div>
+      <div class="tip">● SELECT · SWIPE ⟶ BACK</div>
+    </div>
+
+    <!-- TYPE ADDR -->
+    <div class="screen" id="typeAddr" style="display:none">
+      <div class="prog" id="progType"></div>
+      <div class="hint" style="padding:6px 10px;font-size:10px;color:#8a8a8a;font-weight:bold;text-transform:uppercase">Type the destination</div>
+      <div class="field"><input id="addrInput" type="text" placeholder="Penn Station, NY" autocomplete="off"></div>
+      <div class="tip">ENTER ✓ · SWIPE ⟶ BACK</div>
+    </div>
+
+    <!-- ADDR PREVIEW -->
+    <div class="screen" id="addrPreview" style="display:none">
+      <div class="prog" id="progPrev"></div>
+      <div class="center">
+        <div class="lbl" style="font-size:10px;color:#8a8a8a;letter-spacing:.1em;text-transform:uppercase">Did you mean</div>
+        <div class="big" id="addrPreviewText"></div>
+      </div>
+      <div class="list" id="addrPrevList"></div>
+      <div class="tip">● SELECT · SWIPE ⟶ BACK</div>
+    </div>
+
+    <!-- WHEN -->
+    <div class="screen" id="when" style="display:none">
+      <div class="prog" id="progWhen"></div>
+      <div class="list" id="whenList"></div>
+      <div class="tip">● SELECT · SWIPE ⟶ BACK</div>
+    </div>
+
+    <!-- CONFIRM -->
+    <div class="screen" id="confirm" style="display:none">
+      <div class="prog" id="progConf"></div>
+      <div class="center poster">
+        <div class="lbl">Take me to</div>
+        <div class="marquee" id="confirmAddrWrap"><div class="big" id="confirmAddr"></div></div>
+        <div class="muted" id="confirmWhen"></div>
+        <div class="muted" id="confirmFrom"></div>
+      </div>
+      <div class="row express" id="confirmReq" style="padding-left:38px">
+        <span class="bullet"><span>→</span></span>
+        <div class="meta"><div class="t">Request</div><div class="s">press ●</div></div>
+      </div>
+      <div class="tip">● REQUEST · SWIPE ⟶ BACK</div>
+    </div>
+
+    <!-- QR -->
+    <div class="screen" id="qrview" style="display:none">
+      <div class="center" style="padding-top:6px">
+        <div class="marquee" id="qrTitleWrap"><div class="big" id="qrTitle"></div></div>
+        <div id="qr"></div>
+        <div class="muted" id="qrNote">Scan with your phone · you confirm in Uber</div>
+      </div>
+      <div class="tip" id="qrTip">● HOME · HOLD ⌂ / SWIPE⟵ RIDE HOME</div>
+    </div>
+
+  </div>
+  <div class="toast" id="toast" style="display:none"></div>
+</div>
+
+<script src="qrcode.js"></script>
+<script>
+var HAS = { msg: typeof PluginMessageHandler !== 'undefined', store: !!(window.creationStorage && window.creationStorage.plain) };
+var routes = [], CLIENT_ID = '';   // fully client-side now: no backend
+var intake = { riderType:'me', rider:null, stops:[], when:null, pickup:null };
+var expect = null, pendingStop = null, addrTarget = 'stop';
+
+// MTA palette (line colors)
+var PALETTE = ['#0039A6','#EE352E','#00933C','#FF6319','#FCCC0A','#6CBE45','#996633','#A7A9AC','#2850AD','#B933AD'];
+var BLACK_TXT = {'#FCCC0A':1,'#FF6319':1,'#6CBE45':1,'#A7A9AC':1};
+function routeColor(i){ return PALETTE[i % PALETTE.length]; }
+function bulletColor(c){ return BLACK_TXT[c] ? '#000' : '#fff'; }
+
+// ---------- selection / scroll model ----------
+var selItems = [], sel = 0;
+function registerList(els){ selItems = Array.prototype.slice.call(els||[]); sel = 0; paint(); ensureVis(); }
+function paint(){ selItems.forEach(function(e,i){ e.classList.toggle('sel', i===sel); }); }
+function moveSel(d){ if(!selItems.length) return; sel += d; if(sel<0) sel=selItems.length-1; if(sel>=selItems.length) sel=0; paint(); ensureVis(); }
+function ensureVis(){ var e=selItems[sel]; if(e && e.scrollIntoView) e.scrollIntoView({block:'nearest'}); }
+function activate(){ var e=selItems[sel]; if(e) e.click(); }
+function visId(){ var v=document.querySelector('.screen[style*="flex"]'); return v?v.id:null; }
+
+// ---------- storage (client-side, no backend) ----------
+function loadRoutes(){ if(!HAS.store) return Promise.resolve();
+  return window.creationStorage.plain.getItem('routes').then(function(b){ if(b){try{routes=JSON.parse(atob(b));}catch(e){}} }); }
+function saveRoutes(){ if(!HAS.store) return; window.creationStorage.plain.setItem('routes',btoa(JSON.stringify(routes))); }
+
+// ---------- geocode via Nominatim (direct, no key, CORS-enabled) ----------
+function nominatimGeocode(q){
+  var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=' + encodeURIComponent(q);
+  return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(r){return r.json();}).then(function(j){
+    if(!j || !j.length) throw new Error('no match');
+    var hit=j[0];
+    var confident = !!(hit.address && hit.address.house_number) || parseFloat(hit.importance||0) > 0.6;
+    return { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon), addr: hit.display_name, confident: confident };
+  });
+}
+function nominatimReverse(lat, lng){
+  var url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng);
+  return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(r){return r.json();}).then(function(j){
+    if(!j || !j.display_name) throw new Error('no match');
+    return j.display_name;
+  });
+}
+
+// ---------- station builder ----------
+function station(o){
+  var d=document.createElement('div'); d.className='row'+(o.express?' express':'')+(o.disabled?' disabled':'');
+  var bc = o.color ? bulletColor(o.color) : '#fff';
+  d.innerHTML='<span class="bullet" '+(o.color?'style="background:'+o.color+';color:'+bc+'"':'')+'><span>'+esc(o.letter)+'</span></span>'
+    +'<div class="meta"><div class="t">'+esc(o.title)+'</div>'+(o.sub?'<div class="s">'+esc(o.sub)+'</div>':'')+'</div>';
+  if(o.disabled) d.addEventListener('click', function(){ toast(o.disabledMsg||'not ready'); });
+  else d.addEventListener('click', o.onClick);
+  return d;
+}
+function collect(listEl){ return Array.prototype.slice.call(listEl.querySelectorAll('.row')); }
+
+// ---------- screens ----------
+var WIZ = ['pickup','where','when','confirm'];
+function show(id){
+  ['home','pickup','where','typeAddr','addrPreview','when','confirm','qrview'].forEach(function(s){
+    document.getElementById(s).style.display=(s===id)?'flex':'none'; });
+  if(id!=='home' && WIZ.indexOf(id)>=0) setProg(WIZ.indexOf(id));
+  if(id==='home'){ selItems=[]; sel=0; }
+}
+function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.display='block';
+  clearTimeout(toast._t); toast._t=setTimeout(function(){t.style.display='none';},2200); }
+function setProg(idx){
+  var labels=['Pickup','Where','When','Go'];
+  var map={pickup:'progPickup',where:'progWhere',when:'progWhen',confirm:'progConf'};
+  var host=document.getElementById(map[WIZ[idx]]); if(!host) return;
+  host.innerHTML='';
+  for(var i=0;i<4;i++){
+    var seg=document.createElement('div'); seg.className='seg';
+    var pd=document.createElement('div'); pd.className='pd'+(i<idx?' done':(i===idx?' cur':''));
+    seg.appendChild(pd);
+    if(i<3){ var ln=document.createElement('div'); ln.className='ln'+(i<idx?' done':''); seg.appendChild(ln); }
+    var pl=document.createElement('div'); pl.className='pl'+(i===idx?' cur':''); pl.textContent=labels[i];
+    seg.appendChild(pl);
+    host.appendChild(seg);
+  }
+}
+
+// ---------- HOME ----------
+function homeRoute(){ return routes.find(function(r){return routeMatchesName(r,'home');}) || null; }
+function renderHome(){
+  var el=document.getElementById('homeList'); el.innerHTML='';
+  // voice shortcut
+  el.appendChild(station({ letter:'V', color:'#B933AD', title:'Say a ride', sub:'speak a saved place', onClick:function(){ sayPhrase(); } }));
+  routes.forEach(function(r,i){
+    el.appendChild(station({ letter:(r.name||'?').charAt(0).toUpperCase(), color:routeColor(i), title:r.name,
+      sub:shortAddr(r.dropoff.addr), onClick:function(){ quickSelf(r); } }));
+  });
+  el.appendChild(station({ letter:'+', color:'#00933C', title:'New ride', express:true, onClick:function(){ startWizard(); } }));
+  registerList(collect(el));
+}
+function quickSelf(r){
+  intake={ riderType:'me', rider:null, stops:[{lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}],
+    pickup:(r.pickup&&r.pickup.lat)?{lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}:null, when:null };
+  selfRide();
+}
+
+// ---------- WIZARD: PICKUP ----------
+function startWizard(){ expect=null; pendingStop=null; intake={ riderType:'me', rider:null, stops:[], when:null, pickup:null }; goPickup(); }
+function goPickup(){ renderPickup(); show('pickup'); }
+function renderPickup(){
+  var el=document.getElementById('pickupList'); el.innerHTML='';
+  if(intake.pickup){ el.appendChild(station({ letter:'×', color:'#ff5b5b', title:'Clear pickup', sub:shortAddr(intake.pickup.addr),
+    onClick:function(){ intake.pickup=null; renderPickup(); } })); }
+  el.appendChild(station({ letter:'◉', color:'#00933C', title:'Current location', sub:'use my GPS', onClick:function(){ useCurrentLocation(); } }));
+  routes.forEach(function(r){
+    if(r.pickup && r.pickup.lat) el.appendChild(station({ letter:(r.name||'?').charAt(0).toUpperCase(), color:routeColor(routes.indexOf(r)), title:r.name,
+      sub:'saved pickup', onClick:function(){ intake.pickup={lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}; renderPickup(); } }));
+  });
+  el.appendChild(station({ letter:'T', title:'Type address', onClick:function(){ document.getElementById('addrInput').value=''; addrTarget='pickup'; show('typeAddr'); } }));
+  el.appendChild(station({ letter:'V', color:'#B933AD', title:'Say address', onClick:function(){ sayAddress(); } }));
+  el.appendChild(station({ letter:'→', color:'#00933C', title:intake.stops.length?'Continue':'Skip · my location', express:true, onClick:function(){ goWhere(); } }));
+  registerList(collect(el));
+}
+
+// ---------- WIZARD: WHERE ----------
+function goWhere(){ renderStops(); show('where'); }
+function renderStops(){
+  var el=document.getElementById('stopList'); el.innerHTML='';
+  intake.stops.forEach(function(s,i){ el.appendChild(station({ letter:String(i+1), color:'#00933C', title:shortAddr(s.addr),
+    sub:(i===0?'pickup →':'stop '+(i+1)), onClick:function(){}, sub2:true }));
+    var rm=el.lastChild; rm.addEventListener('click', function(){ intake.stops.splice(i,1); renderStops(); });
+    // remove affordance
+    var x=document.createElement('span'); x.textContent='✕'; x.style.cssText='position:absolute;right:10px;color:#ff5b5b;font-size:14px';
+    x.addEventListener('click', function(e){ e.stopPropagation(); intake.stops.splice(i,1); renderStops(); }); rm.appendChild(x);
+  });
+  el.appendChild(station({ letter:'+', title:'Saved place', onClick:function(){ pickRoute(); } }));
+  el.appendChild(station({ letter:'T', title:'Type address', onClick:function(){ document.getElementById('addrInput').value=''; addrTarget='stop'; show('typeAddr'); } }));
+  el.appendChild(station({ letter:'V', color:'#B933AD', title:'Say address', onClick:function(){ sayAddress(); } }));
+  var cont=station({ letter:'→', color:'#00933C', title:'Continue', express:true, disabled:!intake.stops.length, disabledMsg:'add a stop first', onClick:function(){ goWhen(); } });
+  el.appendChild(cont);
+  registerList(collect(el));
+}
+function pickRoute(){
+  var el=document.getElementById('stopList'); el.innerHTML='';
+  var back=station({ letter:'⟵', title:'Back to stops', onClick:function(){ renderStops(); } }); el.appendChild(back);
+  routes.forEach(function(r){ el.appendChild(station({ letter:(r.name||'?').charAt(0).toUpperCase(), color:routeColor(routes.indexOf(r)), title:r.name,
+    sub:shortAddr(r.dropoff.addr), onClick:function(){ intake.stops.push({lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}); renderStops(); } })); });
+  registerList(collect(el));
+}
+
+// ---------- address input -> geocode -> preview ----------
+function typeAddrGo(){ var v=document.getElementById('addrInput').value.trim(); if(!v){ toast('type something'); return; } geocodeThenPreview(v, addrTarget); }
+function sayAddress(){ expect='address'; if(!HAS.msg){ var a=prompt('Address:'); if(a) geocodeThenPreview(a,'stop'); return; } toast('speak the address…');
+  PluginMessageHandler.postMessage(JSON.stringify({ message:"The user is about to say a destination. Reply with ONLY the raw address text they say, nothing else.", useLLM:true, wantsR1Response:false })); }
+function geocodeThenPreview(q, target){
+  addrTarget=target||'stop';
+  nominatimGeocode(q).then(function(j){
+    pendingStop={lat:j.lat,lng:j.lng,addr:(j.addr||q)};
+    if(j.confident){ addrConfirm(); }          // exact match: skip the preview, just add it
+    else { renderAddrPreview(); }               // fuzzy match: show "Did you mean"
+  }).catch(function(e){ toast('could not find: '+e.message); if(addrTarget==='pickup') goPickup(); else goWhere(); });
+}
+function useCurrentLocation(){
+  if(!navigator.geolocation){ toast('no GPS on this device'); return; }
+  navigator.geolocation.getCurrentPosition(function(pos){
+    nominatimReverse(pos.coords.latitude, pos.coords.longitude).then(function(addr){
+      intake.pickup={lat:pos.coords.latitude,lng:pos.coords.longitude,addr:addr||'current location'}; toast('pickup set'); renderPickup();
+    }).catch(function(){ intake.pickup={lat:pos.coords.latitude,lng:pos.coords.longitude,addr:'current location'}; renderPickup(); });
+  }, function(){ toast('GPS denied'); });
+}
+function renderAddrPreview(){
+  var addLabel = addrTarget==='pickup' ? 'Set pickup' : 'Add stop';
+  document.getElementById('addrPreviewText').textContent = pendingStop ? pendingStop.addr : '';
+  var el=document.getElementById('addrPrevList'); el.innerHTML='';
+  el.appendChild(station({ letter:'✓', color:'#00933C', title:addLabel, express:true, onClick:function(){ addrConfirm(); } }));
+  el.appendChild(station({ letter:'S', color:'#2850AD', title:'Save address', sub:'as a new route', onClick:function(){ savePrompt(); } }));
+  el.appendChild(station({ letter:'✕', color:'#ff5b5b', title:'Retry', onClick:function(){ if(addrTarget==='pickup') goPickup(); else goWhere(); } }));
+  registerList(collect(el));
+}
+function addrConfirm(){ if(!pendingStop) return; if(addrTarget==='pickup'){ intake.pickup=pendingStop; } else { intake.stops.push(pendingStop); } pendingStop=null;
+  if(addrTarget==='pickup') goWhere(); else renderStops(); show('where'); }
+function savePrompt(){
+  if(!pendingStop) return;
+  var name=prompt('Name this place:'); if(!name) return;
+  var aliasStr=prompt('Any other names? (comma-separated, optional):')||'';
+  var aliases=aliasStr.split(',').map(function(s){return s.trim();}).filter(Boolean);
+  var route={ name:name.trim(), aliases:aliases, dropoff:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr},
+    pickup:(intake.pickup&&intake.pickup.lat)?{lat:intake.pickup.lat,lng:intake.pickup.lng,addr:intake.pickup.addr}:null };
+  routes.push(route); saveRoutes(); toast('saved '+name);
+  addrConfirm();
+}
+
+// ---------- WHEN ----------
+function goWhen(){ var el=document.getElementById('whenList'); el.innerHTML='';
+  var presets=[ {t:'Now', when:null}, {t:'+30 min', when:Date.now()+30*60000}, {t:'+1 hour', when:Date.now()+60*60000}, {t:'Tomorrow 8am', when:tomorrowAt(8,0)} ];
+  presets.forEach(function(o){ el.appendChild(station({ letter:o.t.charAt(0), title:o.t, onClick:function(){ intake.when=o.when; goConfirm(); } })); });
+  el.appendChild(station({ letter:'V', color:'#B933AD', title:'Say a time', onClick:function(){ sayTime(); } }));
+  registerList(collect(el)); }
+function tomorrowAt(h,m){ var d=new Date(); d.setDate(d.getDate()+1); d.setHours(h,m,0,0); return d.getTime(); }
+function sayTime(){ expect='time'; if(!HAS.msg){ var t=prompt('When?'); if(t) parseTime(t); return; } toast('speak the time…');
+  PluginMessageHandler.postMessage(JSON.stringify({ message:"The user will say a time. Convert to epoch ms and reply with ONLY that number.", useLLM:true, wantsR1Response:false })); }
+function parseTime(phrase){ if(!HAS.msg){ var m=phrase.match(/(\d{1,2})\s*(am|pm)?/i); var h=m?parseInt(m[1]):8; if(m&&/pm/i.test(m[2])&&h<12)h+=12; intake.when=tomorrowAt(h,0); goConfirm(); return; } }
+
+// ---------- CONFIRM ----------
+function goConfirm(){
+  if(!intake.stops.length){ toast('add a destination (or skip)'); show('where'); return; }
+  var dest=intake.stops[intake.stops.length-1].addr;
+  document.getElementById('confirmAddr').textContent=dest;
+  fitMarquee(document.getElementById('confirmAddrWrap'), document.getElementById('confirmAddr'));
+  document.getElementById('confirmWhen').textContent = intake.when ? new Date(intake.when).toLocaleString() : 'Now';
+  document.getElementById('confirmFrom').textContent = intake.pickup ? 'From: '+shortAddr(intake.pickup.addr) : 'From: my location';
+  show('confirm'); registerList([document.getElementById('confirmReq')]);
+}
+function doRequest(){
+  var link=buildSelfLink(intake.stops, intake.pickup);
+  document.getElementById('qrTitle').textContent=intake.stops[intake.stops.length-1].addr;
+  fitMarquee(document.getElementById('qrTitleWrap'), document.getElementById('qrTitle'));
+  var box=document.getElementById('qr'); box.innerHTML='';
+  try { var q=window.qrcode(0,'M'); q.addData(link); q.make(); box.innerHTML=q.createImgTag(4,6); } catch(e){ box.innerHTML='<div class="muted" style="color:#000">qr lib missing</div>'; }
+  var hr=homeRoute(); document.getElementById('qrNote').textContent = hr ? 'Scan · or swipe ⟵ / hold ⌂ for Home' : 'Scan with your phone · you confirm in Uber';
+  show('qrview');
+}
+
+// ---------- SELF RIDE link ----------
+function buildSelfLink(stops, pickup){
+  var pp = (pickup && pickup.lat) ? JSON.stringify({latitude:pickup.lat,longitude:pickup.lng,addressLine1:pickup.addr}) : 'my_location';
+  var u='https://m.uber.com/looking?pickup='+encodeURIComponent(pp);
+  stops.forEach(function(s,i){ u+='&drop['+i+']='+encodeURIComponent(JSON.stringify({latitude:s.lat,longitude:s.lng,addressLine1:s.addr})); });
+  if(CLIENT_ID) u+='&client_id='+CLIENT_ID;
+  return u;
+}
+function rideHome(){ var r=homeRoute(); if(!r){ toast('no Home saved'); return; }
+  intake={ riderType:'me', rider:null, stops:[{lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}],
+    pickup:(r.pickup&&r.pickup.lat)?{lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}:null, when:null }; doRequest(); }
+
+// ---------- marquee ----------
+function fitMarquee(wrap, big){
+  wrap.classList.remove('scroll');
+  var overflow = big.scrollWidth - wrap.clientWidth;
+  if(overflow > 4){ wrap.style.setProperty('--sd', (-overflow)+'px'); wrap.classList.add('scroll'); }
+}
+
+// ---------- voice phrase shortcut ----------
+function sayPhrase(){ if(!HAS.msg){ var p=prompt('Say a ride (e.g. "Home"):'); if(p) askLLM(p); return; } toast('speak the ride…'); }
+function askLLM(phrase){ expect='phrase'; if(!HAS.msg){ toast('LLM bridge unavailable'); return; }
+  var known=routes.map(function(r){return [r.name].concat(r.aliases||[]).join('/');}).join(', ');
+  var prompt='You are a ride dispatcher. Known routes: '+known+'. Return ONLY JSON: {"route":string|null,"when":epoch ms or null}. route=null if unknown. Parse times like "tomorrow 8am". Phrase: "'+phrase+'"';
+  PluginMessageHandler.postMessage(JSON.stringify({ message:prompt, useLLM:true, wantsR1Response:false })); }
+window.onPluginMessage=function(data){
+  var raw=(data&&data.message)||''; var dt=(data&&data.data)||'';
+  if(expect==='address'){ var a=(raw||'').trim()||(typeof dt==='string'?dt.trim():''); if(!a){ toast('didn\'t hear that'); expect=null; return; } geocodeThenPreview(a,'stop'); expect=null; return; }
+  if(expect==='time'){ var n=parseInt(String(raw||dt).replace(/[^0-9]/g,''),10); if(!n){ toast('couldn\'t parse time'); expect=null; return; } intake.when=n; expect=null; goConfirm(); return; }
+  var parsed=null; try{ parsed=JSON.parse(dt); }catch(e){ try{ parsed=JSON.parse(raw); }catch(_){} }
+  if(!parsed||!parsed.route){ toast('no saved place matches'); expect=null; return; }
+  var r=routes.find(function(x){return routeMatchesName(x,parsed.route);}); if(!r){ toast('no route "'+parsed.route+'"'); expect=null; return; }
+  intake={ riderType:'me', rider:null, stops:[{lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}],
+    pickup:(r.pickup&&r.pickup.lat)?{lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}:null, when:parsed.when||null };
+  if(intake.when) goConfirm(); else quickSelf(r);
+  expect=null;
+};
+
+// ---------- navigation (gestures) ----------
+function goBack(){ var v=visId();
+  if(v==='pickup') show('home');
+  else if(v==='where') goPickup();
+  else if(v==='typeAddr') (addrTarget==='pickup'?goPickup():goWhere());
+  else if(v==='addrPreview') (addrTarget==='pickup'?goPickup():goWhere());
+  else if(v==='when') goWhere();
+  else if(v==='confirm') goWhen();
+  else if(v==='qrview') show('home');
+  else show('home');
+}
+function goForward(){ var v=visId();
+  if(v==='home') startWizard();
+  else if(v==='pickup') goWhere();
+  else if(v==='where'){ if(intake.stops.length) goWhen(); else toast('add a stop first'); }
+  else if(v==='when') goConfirm();
+  else if(v==='confirm') doRequest();
+  else if(v==='qrview') rideHome();
+}
+
+// ---------- hardware + gestures ----------
+window.addEventListener('scrollUp', function(){ moveSel(-1); });
+window.addEventListener('scrollDown', function(){ moveSel(1); });
+window.addEventListener('sideClick', function(){
+  var v=visId();
+  if(v==='typeAddr'){ typeAddrGo(); return; }
+  if(v==='confirm'){ doRequest(); return; }
+  if(v==='qrview'){ show('home'); return; }
+  if(selItems.length) activate();
+});
+window.addEventListener('longPressStart', function(){
+  var v=visId();
+  if(v==='qrview'){ rideHome(); }
+  else if(['pickup','where','when','confirm','addrPreview','typeAddr'].indexOf(v)>=0){ show('home'); }
+});
+// swipe via pointer events (Android WebView)
+var sx=0, sy=0, sw=false; var view=document.getElementById('view');
+view.addEventListener('pointerdown', function(e){ sx=e.clientX; sy=e.clientY; sw=true; });
+view.addEventListener('pointerup', function(e){ if(!sw) return; sw=false; var dx=e.clientX-sx, dy=e.clientY-sy;
+  if(Math.abs(dx)>40 && Math.abs(dy)<40){ if(dx>0) goBack(); else goForward(); } });
+// desktop keyboard fallback (harmless on device)
+document.addEventListener('keydown', function(e){
+  if(document.activeElement && document.activeElement.id==='addrInput') return;
+  if(e.key==='ArrowUp'){ moveSel(-1); e.preventDefault(); }
+  else if(e.key==='ArrowDown'){ moveSel(1); e.preventDefault(); }
+  else if(e.key==='Enter'){ var v=visId(); if(v==='typeAddr') typeAddrGo(); else if(v==='confirm') doRequest(); else if(v==='qrview') show('home'); else if(selItems.length) activate(); }
+  else if(e.key==='Escape'){ goBack(); }
+});
+document.getElementById('addrInput').addEventListener('keydown', function(e){ if(e.key==='Enter'){ typeAddrGo(); e.preventDefault(); } });
+
+// ---------- boot ----------
+function boot(){ loadRoutes().then(function(){ routes=routes||[]; renderHome(); show('home'); }); }
+boot();
+
+// ---------- utils ----------
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function shortAddr(a){ if(!a) return ''; var p=a.split(','); return p.slice(0,2).join(', '); }
+function routeMatchesName(r,n){ n=String(n||'').toLowerCase(); if(!n) return false;
+  if((r.name||'').toLowerCase()===n) return true; return (r.aliases||[]).some(function(a){ return String(a).toLowerCase()===n; }); }
+</script>
+</body>
+</html>
