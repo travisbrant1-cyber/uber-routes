@@ -215,7 +215,7 @@ function show(id){
   ['home','pickup','where','typeAddr','addrPreview','when','confirm','qrview'].forEach(function(s){
     document.getElementById(s).style.display=(s===id)?'flex':'none'; });
   if(id!=='home' && WIZ.indexOf(id)>=0) setProg(WIZ.indexOf(id));
-  if(id==='home'){ selItems=[]; sel=0; }
+  if(id==='home'){ renderHome(); }   // re-render + re-register selection model (was clearing selItems, breaking scroll/PTT)
 }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.display='block';
   clearTimeout(toast._t); toast._t=setTimeout(function(){t.style.display='none';},2200); }
@@ -361,6 +361,7 @@ function goConfirm(){
   document.getElementById('confirmFrom').textContent = intake.pickup ? 'From: '+shortAddr(intake.pickup.addr) : 'From: my location';
   show('confirm'); registerList([document.getElementById('confirmReq')]);
 }
+function selfRide(){ doRequest(); }
 function doRequest(){
   var link=buildSelfLink(intake.stops, intake.pickup);
   document.getElementById('qrTitle').textContent=intake.stops[intake.stops.length-1].addr;
@@ -430,8 +431,20 @@ function goForward(){ var v=visId();
 }
 
 // ---------- hardware + gestures ----------
-window.addEventListener('scrollUp', function(){ moveSel(-1); });
-window.addEventListener('scrollDown', function(){ moveSel(1); });
+var DEBUG = /[#&?]debug/.test(location.href);
+if(DEBUG){
+  ['scrollUp','scrollDown','sideClick','longPressStart','longPressEnd','keydown','wheel'].forEach(function(ev){
+    window.addEventListener(ev, function(e){ console.log('EVT', ev, e && e.deltaY!==undefined ? e.deltaY : ''); });
+  });
+  window.addEventListener('error', function(e){ console.log('ERR', e.message); });
+}
+// debounce so a single physical scroll can't trigger two moves via duplicate synthetic events
+var _lastMove = 0;
+function moveSelDebounced(d){ var now=Date.now(); if(now-_lastMove<120) return; _lastMove=now; moveSel(d); }
+window.addEventListener('scrollUp', function(){ moveSelDebounced(-1); });
+window.addEventListener('scrollDown', function(){ moveSelDebounced(1); });
+// native wheel fallback (some firmware emits 'wheel' instead of the synthetic scroll events)
+window.addEventListener('wheel', function(e){ moveSelDebounced(e.deltaY<0?-1:1); }, { passive:true });
 window.addEventListener('sideClick', function(){
   var v=visId();
   if(v==='typeAddr'){ typeAddrGo(); return; }
