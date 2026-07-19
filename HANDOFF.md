@@ -25,7 +25,7 @@ As of the latest commit the creation has **no backend dependency**. It is a sing
 | `setup/` | `index.html` | **ORPHANED.** Old phone-side route manager that talked to the backend. Unused now that the creation manages its own routes via `creationStorage`. Kept in repo per request; safe to delete later. |
 | `backend/` | `server.js`, `data.json` | **ORPHANED.** Old Node backend (Nominatim geocode + route storage). No longer called by the creation. Kept in repo per request; safe to delete later. |
 | root | `index.html` | **The file GitHub Pages actually serves** (gh-pages branch root). Published from `r1/index.html` via `git show master:r1/index.html`. |
-| root | `install-qr.png` | Install QR (scannable by the R1 camera) → points at the Pages URL. |
+| root | `install-qr.png` | Install QR (scannable by the R1 camera). Encodes the R1 **JSON envelope** `{"title","url","description","iconUrl","themeColor"}` — NOT a bare URL (a bare URL QR is not recognized by the R1 installer; see §5). |
 
 **What runs where (no server):**
 - **Geocoding** → Nominatim (OpenStreetMap) called **directly from the creation** via `fetch` to `https://nominatim.openstreetmap.org/search?format=jsonv2` (CORS-enabled, no API key). `nominatimGeocode()` / `nominatimReverse()` in `r1/index.html`.
@@ -68,6 +68,12 @@ Guest-ride code is preserved on **`guest-rides-deeplink`** (nothing lost). To re
 https://travisbrant1-cyber.github.io/uber-routes/
 ```
 Install on the R1: open `install-qr.png` (repo root) and scan it with the R1 camera, OR point the R1's creation loader at the URL above.
+
+**⚠️ The install QR must encode the R1 JSON envelope, NOT a bare URL.** The R1 camera/installer only recognizes a QR whose payload is JSON of the form `{"title","url","description","iconUrl","themeColor"}` (per the official SDK `qr/` generator in `creations-sdk/qr/final/`). A QR containing just `https://...` is silently not recognized. The current `install-qr.png` is correct. To regenerate (e.g. if the URL changes), use the SDK generator at `creations-sdk/qr/final/index_fixed.html` (fill Title + URL, download), or produce the equivalent JSON payload:
+```json
+{"title":"Uber Routes","url":"https://travisbrant1-cyber.github.io/uber-routes/","description":"Order Uber rides by voice or buttons using saved routes.","iconUrl":"","themeColor":"#FE5000"}
+```
+Encode that exact JSON string (Byte mode) into the QR. (Earlier bare-URL QR was the reason the R1 "didn't recognize" the install.)
 
 **Local dev / edit:**
 ```
