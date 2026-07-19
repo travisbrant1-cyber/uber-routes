@@ -14,6 +14,32 @@
       },
       "id": "e27f1774-7dbc-4cc0-96ae-15df75917472",
       "aliases": []
+    },
+    {
+      "id": "106cb47d-727d-4fc8-b913-ca6061143292",
+      "aliases": [
+        "job"
+      ],
+      "name": "Work",
+      "dropoff": {
+        "lat": 40.7505,
+        "lng": -73.9935,
+        "addr": "Penn Station, New York, NY"
+      },
+      "pickup": null
+    },
+    {
+      "id": "c72d9096-36bc-4ad4-bc28-24a6319e5cb8",
+      "aliases": [
+        "house"
+      ],
+      "name": "Home",
+      "dropoff": {
+        "lat": 40.71,
+        "lng": -74,
+        "addr": "123 Maple St, Brooklyn, NY"
+      },
+      "pickup": null
     }
   ]
 }
