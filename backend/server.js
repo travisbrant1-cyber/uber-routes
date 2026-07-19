@@ -1,8 +1,9 @@
-// Uber Routes backend — geocoding + saved routes/guests storage for the R1 creation.
-// Rides (both self and "for someone else") are built entirely client-side as m.uber.com
-// deep links + a QR code. Uber's deep link scheme has no parameter for a recipient/guest
-// or a scheduled pickup time (confirmed against Uber's own deep-link docs) -- those are
-// in-app-only, so this backend never talks to Uber's API at all.
+// Uber Routes backend — geocoding + saved routes storage for the R1 creation.
+// Self-rides only for now: rides are built entirely client-side as m.uber.com deep links + a QR
+// code. Guest rides ("for someone else") were removed after confirming Uber's deep link scheme
+// has no recipient parameter, and the in-app picker isn't reachable once a deep link has already
+// opened the app -- see the "guest-rides-deeplink" git branch if that's ever worth revisiting.
+// This backend never talks to Uber's API at all -- just Nominatim geocoding + JSON storage.
 //
 // Env:
 //   PORT               (default 8788)
@@ -16,7 +17,7 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 8788;
 const CLIENT_ID = process.env.UBER_CLIENT_ID || '';
 
-const DATA_FILE = path.join(__dirname, 'data.json'); // routes + guests + consent
+const DATA_FILE = path.join(__dirname, 'data.json'); // saved routes
 
 // Static file serving for the creation + setup page (relative to repo root).
 const ROOT = path.join(__dirname, '..');
@@ -43,14 +44,13 @@ function serveStatic(res, key) {
 function ensureIds(d) {
   var changed = false;
   (d.routes || []).forEach(function (r) { if (!r.id) { r.id = crypto.randomUUID(); changed = true; } if (!r.aliases) { r.aliases = []; changed = true; } });
-  (d.guests || []).forEach(function (g) { if (!g.id) { g.id = crypto.randomUUID(); changed = true; } });
   return changed;
 }
 function load() {
   var d;
   try { d = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); }
-  catch { d = { routes: [], guests: [] }; }
-  d.routes = d.routes || []; d.guests = d.guests || [];
+  catch { d = { routes: [] }; }
+  d.routes = d.routes || [];
   if (ensureIds(d)) save(d);
   return d;
 }
@@ -113,7 +113,6 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const d = load();
       if (body.route) { d.routes = d.routes || []; d.routes.push(Object.assign({ id: crypto.randomUUID(), aliases: [] }, body.route)); }
-      if (body.guest) { d.guests = d.guests || []; d.guests.push(Object.assign({ id: crypto.randomUUID() }, body.guest)); }
       save(d);
       return send(res, 200, d);
     }
@@ -129,22 +128,6 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'DELETE') { d.routes.splice(idx, 1); save(d); return send(res, 200, d); }
         const body = await readBody(req);
         d.routes[idx] = Object.assign({}, d.routes[idx], body.route, { id });
-        save(d);
-        return send(res, 200, d);
-      }
-    }
-
-    // Edit or delete a saved person (guest), same id-based scheme.
-    {
-      const m = p.match(/^\/guests\/([^\/]+)$/);
-      if (m && (req.method === 'PUT' || req.method === 'DELETE')) {
-        const id = decodeURIComponent(m[1]);
-        const d = load();
-        const idx = (d.guests || []).findIndex(g => g.id === id);
-        if (idx === -1) return send(res, 404, { error: 'person not found' });
-        if (req.method === 'DELETE') { d.guests.splice(idx, 1); save(d); return send(res, 200, d); }
-        const body = await readBody(req);
-        d.guests[idx] = Object.assign({}, d.guests[idx], body.guest, { id });
         save(d);
         return send(res, 200, d);
       }

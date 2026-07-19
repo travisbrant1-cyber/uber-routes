@@ -66,23 +66,16 @@
       <div class="bar go" id="newRide">＋ NEW RIDE</div>
     </div>
 
-    <!-- WHO -->
-    <div class="screen" id="who" style="display:none">
-      <div class="stepline"><span class="dot on"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="lbl">Who's riding?</span></div>
-      <div class="list" id="whoList"></div>
-      <div class="bar" id="whoBack">◀ back</div>
-    </div>
-
     <!-- PICKUP -->
     <div class="screen" id="pickup" style="display:none">
-      <div class="stepline"><span class="dot on"></span><span class="dot on"></span><span class="dot"></span><span class="dot"></span><span class="lbl">Pickup?</span></div>
+      <div class="stepline"><span class="dot on"></span><span class="dot"></span><span class="dot"></span><span class="lbl">Pickup?</span></div>
       <div class="list" id="pickupList"></div>
       <div class="bar go" id="pickupNext">NEXT ▶</div>
     </div>
 
     <!-- WHERE (stops) -->
     <div class="screen" id="where" style="display:none">
-      <div class="stepline"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot"></span><span class="lbl">Where to?</span></div>
+      <div class="stepline"><span class="dot on"></span><span class="dot on"></span><span class="dot"></span><span class="lbl">Where to?</span></div>
       <div class="list" id="stopList"></div>
       <div class="bar go" id="whereNext">NEXT ▶</div>
     </div>
@@ -108,7 +101,7 @@
 
     <!-- WHEN -->
     <div class="screen" id="when" style="display:none">
-      <div class="stepline"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="lbl">When?</span></div>
+      <div class="stepline"><span class="dot on"></span><span class="dot on"></span><span class="dot on"></span><span class="lbl">When?</span></div>
       <div class="list" id="whenList"></div>
       <div class="bar" id="whenBack">◀ back</div>
     </div>
@@ -144,10 +137,15 @@
 <script>
 var HAS = { msg: typeof PluginMessageHandler !== 'undefined', store: !!(window.creationStorage && window.creationStorage.plain) };
 var BACKEND = location.origin;
-var routes = [], guests = [], CLIENT_ID = '';
+var routes = [], CLIENT_ID = '';
 
-// intake state collected by the form
-var intake = { riderType:'me', rider:null, stops:[], when:null, pickup:null };
+// intake state collected by the form. Self-rides only for now -- guest rides (booking for
+// someone else) were removed after confirming Uber's deep link scheme has no way to specify a
+// recipient, and the in-app "for someone else" picker isn't reachable once a deep link has
+// already opened the app (confirmed on-device). See the "guest-rides-deeplink" git branch for
+// that attempt if it's ever worth revisiting -- e.g. if Uber for Business/Guest Rides API access
+// becomes available, or a different deep-link approach turns out to work.
+var intake = { stops:[], when:null, pickup:null };
 var expect = null;        // null | 'phrase' | 'address' | 'time'
 var pendingStop = null;   // stop awaiting confirmation in addrPreview
 var addrTarget = 'stop';  // 'stop' | 'pickup' -- which field typeAddr/addrPreview/say write into
@@ -155,20 +153,17 @@ var addrTarget = 'stop';  // 'stop' | 'pickup' -- which field typeAddr/addrPrevi
 // ---------- storage ----------
 function loadRoutes(){ if(!HAS.store) return Promise.resolve();
   return window.creationStorage.plain.getItem('routes').then(function(b){ if(b){try{routes=JSON.parse(atob(b));}catch(e){}} }); }
-function loadGuests(){ if(!HAS.store) return Promise.resolve();
-  return window.creationStorage.plain.getItem('guests').then(function(b){ if(b){try{guests=JSON.parse(atob(b));}catch(e){}} }); }
 function syncFromBackend(){
   return fetch(BACKEND+'/config').then(function(r){return r.json();}).then(function(c){ CLIENT_ID=c.clientId||''; document.getElementById('mode').textContent='online'; })
     .catch(function(){ document.getElementById('mode').textContent='offline'; })
     .then(function(){ return fetch(BACKEND+'/routes'); }).then(function(r){return r.json();}).then(function(d){
-      routes=d.routes||[]; guests=d.guests||[];
-      if(HAS.store){ window.creationStorage.plain.setItem('routes',btoa(JSON.stringify(routes)));
-        window.creationStorage.plain.setItem('guests',btoa(JSON.stringify(guests))); }
+      routes=d.routes||[];
+      if(HAS.store){ window.creationStorage.plain.setItem('routes',btoa(JSON.stringify(routes))); }
     }).catch(function(){});
 }
 
 // ---------- screens ----------
-var SCREENS=['home','who','pickup','where','typeAddr','addrPreview','when','confirm','qrview'];
+var SCREENS=['home','pickup','where','typeAddr','addrPreview','when','confirm','qrview'];
 function show(id){ SCREENS.forEach(function(s){ document.getElementById(s).style.display=(s===id)?'flex':'none'; });
   if(id==='home'){ expect=null; pendingStop=null; } }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.display='block';
@@ -184,36 +179,15 @@ function renderHome(){
     d.addEventListener('click',function(){ quickSelf(r); }); el.appendChild(d); });
 }
 function quickSelf(r){
-  intake={ riderType:'me', rider:null, stops:[{lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}],
+  intake={ stops:[{lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}],
     pickup:(r.pickup&&r.pickup.lat)?{lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}:null, when:null };
   showRideLink();
 }
 
-// ---------- WHO ----------
+// ---------- NEW RIDE ----------
 function startWizard(){ expect=null; pendingStop=null;
-  intake={ riderType:'me', rider:null, stops:[], when:null, pickup:null };
-  var el=document.getElementById('whoList'); el.innerHTML='';
-  var me=document.createElement('div'); me.className='row';
-  me.innerHTML='<div class="t">🙂 Me</div><div class="s">ride from my location, I confirm in app</div>';
-  me.addEventListener('click',function(){ intake.riderType='me'; intake.rider=null; goPickup(); }); el.appendChild(me);
-  guests.forEach(function(g){ var d=document.createElement('div'); d.className='row';
-    d.innerHTML='<div class="t">'+esc(g.name)+'</div><div class="s">'+esc(g.phone_number||'')+(g.consent?' · SMS ✓':' · NO consent')+'</div>';
-    d.addEventListener('click',function(){ if(!g.consent){ toast('needs SMS consent first'); return; }
-      intake.riderType='guest'; intake.rider=g; goPickup(); }); el.appendChild(d); });
-  var np=document.createElement('div'); np.className='row';
-  np.innerHTML='<div class="t">＋ Someone new</div><div class="s">enter a phone (needs consent)</div>';
-  np.addEventListener('click',function(){ newPerson(); }); el.appendChild(np);
-  show('who');
-}
-function newPerson(){
-  var name=prompt('Person\'s name:'); if(!name) return;
-  var phone=prompt('Phone (+country code):'); if(!phone) return;
-  if(!confirm('Confirm you have this person\'s consent to receive Uber SMS?')) return;
-  var parts=name.trim().split(' ');
-  var g={ name:name.trim(), phone_number:phone.trim(), consent:true, first_name:parts[0], last_name:parts.slice(1).join(' ') };
-  if(HAS.store) window.creationStorage.plain.setItem('guests',btoa(JSON.stringify(guests.concat(g))));
-  fetch(BACKEND+'/routes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({guest:g})}).catch(function(){});
-  guests.push(g); intake.riderType='guest'; intake.rider=g; goPickup();
+  intake={ stops:[], when:null, pickup:null };
+  goPickup();
 }
 
 // ---------- PICKUP ----------
@@ -242,12 +216,9 @@ function renderPickup(){
   say.innerHTML='<div class="t">🎤 Say address</div>';
   say.addEventListener('click',function(){ addrTarget='pickup'; sayAddress(); }); el.appendChild(say);
   var next=document.getElementById('pickupNext');
-  var required = intake.riderType==='guest';
-  if(intake.pickup){ next.textContent='NEXT ▶'; next.className='bar go'; }
-  else if(required){ next.textContent='add a pickup address above'; next.className='bar no'; }
-  else { next.textContent='SKIP (Uber uses your GPS) ▶'; next.className='bar go'; }
+  next.textContent = intake.pickup ? 'NEXT ▶' : 'SKIP (Uber uses your GPS) ▶';
+  next.className='bar go';
 }
-function pickupCanProceed(){ return !!intake.pickup || intake.riderType!=='guest'; }
 function useCurrentLocation(){
   if(!navigator.geolocation){ toast('location not available — try typing it'); return; }
   toast('locating…');
@@ -373,8 +344,7 @@ function parseTime(phrase){
 // ---------- CONFIRM ----------
 function goConfirm(){
   if(!intake.stops.length){ toast('add a destination first'); show('where'); return; }
-  var who = intake.riderType==='guest' ? esc(intake.rider.name) : 'me';
-  document.getElementById('confirmWho').innerHTML='Take <b>'+who+'</b> to'
+  document.getElementById('confirmWho').innerHTML='Take <b>me</b> to'
     + (intake.stops.length>1?' <span class="pill">+'+(intake.stops.length-1)+' stop</span>':'');
   document.getElementById('confirmAddr').textContent = shortAddr(intake.stops[intake.stops.length-1].addr);
   document.getElementById('confirmWhen').innerHTML = (intake.when ? '📅 '+new Date(intake.when).toLocaleString() : '🚕 now')
@@ -384,23 +354,20 @@ function goConfirm(){
 }
 function doRequest(){ showRideLink(); }
 
-// ---------- RIDE LINK (client-side deeplink + QR, for both self and guest rides) ----------
-// Uber deep links have no parameter for "this ride is for someone else" or a recipient phone
-// number (verified against Uber's own deep-link docs) -- that's an in-app-only picker in the
-// consumer Uber app, and deep links also can't set a future pickup time (scheduling is API-only).
-// So a guest/scheduled ride still gets a QR built the same way as a self-ride; it just carries a
-// reminder for the one or two things you have to set manually once the Uber app opens.
+// ---------- RIDE LINK (client-side deeplink + QR) ----------
+// Self-rides only -- deep links have no parameter for a scheduled pickup time either, confirmed
+// against Uber's own docs, so a scheduled "when" is a reminder only, not an actual API request.
 function showRideLink(){
   var link=buildSelfLink(intake.stops, intake.pickup);
   var dest=shortAddr(intake.stops[intake.stops.length-1].addr);
-  document.getElementById('qrTitle').textContent = intake.riderType==='guest' ? 'Ride to '+dest+' for '+intake.rider.name : 'Ride to '+dest;
+  document.getElementById('qrTitle').textContent = 'Ride to '+dest;
   var box=document.getElementById('qr'); box.innerHTML='';
   try { var q=window.qrcode(0,'M'); q.addData(link); q.make(); box.innerHTML=q.createImgTag(4,6); }
   catch(e){ box.innerHTML='<div class="muted" style="color:#000">qr lib missing</div>'; }
   var note = document.getElementById('qrNote');
-  if(intake.riderType==='guest'){ note.innerHTML='Scan, then in Uber pick <b>'+esc(intake.rider.name)+'</b> as rider before confirming'; }
-  else if(intake.when){ note.innerHTML='Scan — links can\'t schedule, so set the time manually in Uber'; }
-  else { note.innerHTML='Scan with your phone camera<br>Uber opens prefilled · you tap confirm'; }
+  note.innerHTML = intake.when
+    ? 'Scan — links can\'t schedule, so set the time manually in Uber'
+    : 'Scan with your phone camera<br>Uber opens prefilled · you tap confirm';
   show('qrview');
   fitMarquee('qrTitleWrap','qrTitle');
   renderHomeShortcut('qrHome');
@@ -443,10 +410,9 @@ function startVoice(kind){
 function askLLM(phrase){
   if(!HAS.msg){ toast('LLM bridge unavailable'); return; }
   startVoice('phrase');
-  var known='You are a ride dispatcher. Known routes: '+routes.map(function(r){return [r.name].concat(r.aliases||[]).join('/');}).join(', ')+'. '
-    +'Known people: '+guests.map(function(g){return g.name;}).join(', ')+'.\n'
-    +'Return ONLY JSON: {"route":string|null,"guest":string|null,"when":epoch ms or null}.\n'
-    +'guest=null if the ride is for the speaker. Parse times like "tomorrow 8am" to epoch ms.\n';
+  var known='You are a ride dispatcher. Known routes: '+routes.map(function(r){return [r.name].concat(r.aliases||[]).join('/');}).join(', ')+'.\n'
+    +'Return ONLY JSON: {"route":string|null,"when":epoch ms or null}.\n'
+    +'Parse times like "tomorrow 8am" to epoch ms.\n';
   var prompt = phrase ? known+'Phrase: "'+phrase+'"' : known+'The user is about to say the phrase describing the ride they want.';
   PluginMessageHandler.postMessage(JSON.stringify({ message:prompt, useLLM:true, wantsR1Response:false }));
 }
@@ -468,20 +434,13 @@ window.onPluginMessage=function(data){
   // full-phrase shortcut
   var parsed=null;
   try{ parsed=JSON.parse(dt); }catch(e){ try{ parsed=JSON.parse(raw); }catch(_){} }
-  if(!parsed||(!parsed.route&&!parsed.guest)){ toast('didn\'t catch that'); expect=null; return; }
+  if(!parsed||!parsed.route){ toast('didn\'t catch that'); expect=null; return; }
   var route=routes.find(function(r){return routeMatchesName(r, parsed.route);});
   if(!route){ toast('no route "'+parsed.route+'"'); expect=null; return; }
-  if(parsed.guest){
-    var g=guests.find(function(x){return x.name.toLowerCase()===String(parsed.guest).toLowerCase();});
-    if(!g){ toast('no person "'+parsed.guest+'"'); expect=null; return; }
-    if(!g.consent){ toast(g.name+' needs SMS consent'); expect=null; return; }
-    intake={ riderType:'guest', rider:g, stops:[{lat:route.dropoff.lat,lng:route.dropoff.lng,addr:route.dropoff.addr}],
-      pickup:(route.pickup&&route.pickup.lat)?{lat:route.pickup.lat,lng:route.pickup.lng,addr:route.pickup.addr}:null, when:parsed.when||null };
-    goConfirm();
-  } else { quickSelf(route); }
+  quickSelf(route);
   expect=null;
 };
-function sayPhrase(){ if(!HAS.msg){ var p=prompt('Say a phrase (e.g. "Take Josh to Work tomorrow 8am"):'); if(p) askLLM(p); return; } toast('speak now…'); askLLM(); }
+function sayPhrase(){ if(!HAS.msg){ var p=prompt('Say a phrase (e.g. "Take me to Work tomorrow 8am"):'); if(p) askLLM(p); return; } toast('speak now…'); askLLM(); }
 
 // ---------- hardware ----------
 window.addEventListener('scrollUp', function(){ document.querySelectorAll('.list').forEach(function(l){ if(l.offsetParent!==null) l.scrollTop-=44; }); });
@@ -489,8 +448,7 @@ window.addEventListener('scrollDown', function(){ document.querySelectorAll('.li
 window.addEventListener('sideClick', function(){
   var v=visId(); if(!v) return;
   if(v==='confirm') doRequest();
-  else if(v==='who') goPickup();
-  else if(v==='pickup'){ if(!pickupCanProceed()){ toast('add a pickup address first'); } else { goWhere(); } }
+  else if(v==='pickup') goWhere();
   else if(v==='where'){ if(!intake.stops.length){ toast('add a destination first'); } else { goWhen(); } }
   else if(v==='typeAddr') typeAddrGo();
   else if(v==='when') goConfirm();
@@ -501,7 +459,6 @@ window.addEventListener('sideClick', function(){
 
 // ---------- nav ----------
 document.getElementById('newRide').addEventListener('click', startWizard);
-document.getElementById('whoBack').addEventListener('click', function(){ show('home'); });
 document.getElementById('whereNext').addEventListener('click', function(){
   if(!intake.stops.length){ toast('add a destination first'); return; } goWhen(); });
 document.getElementById('typeBack').addEventListener('click', function(){ show(addrBackScreen()); });
@@ -510,16 +467,15 @@ document.getElementById('addrAdd').addEventListener('click', typeAddrGo);
 document.getElementById('addrOk').addEventListener('click', addrConfirm);
 document.getElementById('addrSave').addEventListener('click', addrSaveAsRoute);
 document.getElementById('addrRetry').addEventListener('click', function(){ show(addrBackScreen()); });
-document.getElementById('pickupNext').addEventListener('click', function(){
-  if(!pickupCanProceed()){ toast('add a pickup address first'); return; } goWhere(); });
+document.getElementById('pickupNext').addEventListener('click', goWhere);
 document.getElementById('whenBack').addEventListener('click', goWhere);
 document.getElementById('confirmBar').addEventListener('click', doRequest);
 document.getElementById('qrBack').addEventListener('click', function(){ show('home'); });
 
 // ---------- boot ----------
 function boot(){
-  syncFromBackend().then(loadRoutes).then(loadGuests).then(function(){
-    routes=routes||[]; guests=guests||[]; renderHome(); show('home');
+  syncFromBackend().then(loadRoutes).then(function(){
+    routes=routes||[]; renderHome(); show('home');
   });
 }
 boot();

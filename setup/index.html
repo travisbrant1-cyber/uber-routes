@@ -20,15 +20,13 @@
   .item .info { min-width:0; }
   .item small { color:#888; }
   .item .actions { flex-shrink:0; white-space:nowrap; }
-  .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:#e8f7ee; color:#1a7f43; }
-  .pill.no { background:#fdeaea; color:#b3261e; }
   .status { font-size:13px; color:#555; min-height:18px; margin-top:8px; }
   code { background:#eee; padding:1px 5px; border-radius:4px; }
 </style>
 </head>
 <body>
 <h1>🚗 Uber Routes setup</h1>
-<p style="font-size:13px;color:#666">Add the places and people your Rabbit R1 can summon rides for. Set your R1 creation's <code>BACKEND</code> to this page's URL. Data is stored on your backend server.</p>
+<p style="font-size:13px;color:#666">Add the places your Rabbit R1 can summon rides for. Set your R1 creation's <code>BACKEND</code> to this page's URL. Data is stored on your backend server.</p>
 
 <div id="cfg" class="status"></div>
 
@@ -49,29 +47,10 @@
 </div>
 <div id="routesList"></div>
 
-<h2>People (rides for someone else)</h2>
-<div class="card">
-  <label>Name (e.g. "Josh")</label>
-  <input id="gName" placeholder="Josh">
-  <div class="row">
-    <div><label>Phone (+country)</label><input id="gPhone" placeholder="+14155550000"></div>
-    <div><label>Email</label><input id="gEmail" placeholder="josh@x.com"></div>
-  </div>
-  <label style="display:flex;align-items:center;gap:8px;color:#1a1a1a;font-size:13px">
-    <input type="checkbox" id="gConsent" style="width:auto"> I have consent from this person (and any notified contacts) to receive Uber SMS trip updates.
-  </label>
-  <div class="row">
-    <button id="gSaveBtn" onclick="saveGuest()">Save person</button>
-    <button id="gCancelBtn" class="sec" onclick="cancelGuestEdit()" style="display:none">Cancel</button>
-  </div>
-</div>
-<div id="guestsList"></div>
-
 <script>
 var BACKEND = location.origin; // served by the same backend
 function $(id){ return document.getElementById(id); }
 var editingRouteId = null;
-var editingGuestId = null;
 
 async function cfg(){
   try {
@@ -99,22 +78,6 @@ async function refresh(){
       rl.appendChild(div);
     });
     if(!(d.routes||[]).length) rl.innerHTML = '<div class="status">No routes yet.</div>';
-
-    var gl = $('guestsList'); gl.innerHTML = '';
-    (d.guests||[]).forEach(function(g){
-      var div = document.createElement('div'); div.className = 'item';
-      div.innerHTML = '<div class="info"><b>'+esc(g.name)+'</b><br><small>'+esc(g.phone_number||'')+'</small></div>';
-      var actions = document.createElement('div'); actions.className = 'actions';
-      actions.innerHTML = g.consent ? '<span class="pill">SMS ✓</span>' : '<span class="pill no">no consent</span>';
-      var editBtn = document.createElement('button'); editBtn.className = 'sec small'; editBtn.textContent = 'Edit';
-      editBtn.addEventListener('click', function(){ fillGuestForm(g); });
-      var delBtn = document.createElement('button'); delBtn.className = 'danger small'; delBtn.textContent = 'Delete';
-      delBtn.addEventListener('click', function(){ deleteGuest(g.id, g.name); });
-      actions.appendChild(editBtn); actions.appendChild(delBtn);
-      div.appendChild(actions);
-      gl.appendChild(div);
-    });
-    if(!(d.guests||[]).length) gl.innerHTML = '<div class="status">No people yet.</div>';
   } catch(e){}
 }
 
@@ -156,40 +119,6 @@ async function saveRoute(){
 async function deleteRoute(id, name){
   if(!confirm('Delete "'+name+'"?')) return;
   await fetch(BACKEND+'/routes/'+encodeURIComponent(id), {method:'DELETE'});
-  refresh();
-}
-
-function fillGuestForm(g){
-  editingGuestId = g.id;
-  $('gName').value = g.name; $('gPhone').value = g.phone_number||''; $('gEmail').value = g.email||'';
-  $('gConsent').checked = !!g.consent;
-  $('gSaveBtn').textContent = 'Update person';
-  $('gCancelBtn').style.display = 'inline-block';
-  window.scrollTo(0,0);
-}
-function cancelGuestEdit(){
-  editingGuestId = null;
-  $('gName').value = $('gPhone').value = $('gEmail').value = ''; $('gConsent').checked = false;
-  $('gSaveBtn').textContent = 'Save person';
-  $('gCancelBtn').style.display = 'none';
-}
-async function saveGuest(){
-  var name=$('gName').value.trim(), phone=$('gPhone').value.trim(), email=$('gEmail').value.trim(), consent=$('gConsent').checked;
-  if(!name||!phone){ alert('Need a name and phone.'); return; }
-  var parts = name.split(' ');
-  var guest = { name:name, phone_number:phone, email:email, consent:consent,
-    first_name:parts[0], last_name:parts.slice(1).join(' ') };
-  if(editingGuestId){
-    await fetch(BACKEND+'/guests/'+encodeURIComponent(editingGuestId), {method:'PUT', headers:{'content-type':'application/json'}, body:JSON.stringify({guest:guest})});
-  } else {
-    await fetch(BACKEND+'/routes', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({guest:guest})});
-  }
-  cancelGuestEdit();
-  refresh();
-}
-async function deleteGuest(id, name){
-  if(!confirm('Delete "'+name+'"?')) return;
-  await fetch(BACKEND+'/guests/'+encodeURIComponent(id), {method:'DELETE'});
   refresh();
 }
 
