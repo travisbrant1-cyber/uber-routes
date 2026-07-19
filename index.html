@@ -164,6 +164,7 @@
         <div id="qr"></div>
         <div class="muted" id="qrNote">Scan with your phone · you confirm in Uber</div>
       </div>
+      <div class="list" id="qrList" style="flex:none;overflow:hidden"></div>
       <div class="tip" id="qrTip">● HOME · HOLD ⌂ / SWIPE⟵ RIDE HOME</div>
     </div>
 
@@ -320,6 +321,7 @@ function renderPickup(){
     if(r.pickup && r.pickup.lat) el.appendChild(station({ letter:(r.name||'?').charAt(0).toUpperCase(), color:routeColor(routes.indexOf(r)), title:r.name,
       sub:'saved pickup', onClick:function(){ intake.pickup={lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}; renderPickup(); } }));
   });
+  if(intake.pickup){ el.appendChild(station({ letter:'S', color:'#2850AD', title:'Save pickup', sub:shortAddr(intake.pickup.addr), onClick:function(){ savePrompt('pickup'); } })); }
   el.appendChild(station({ letter:'T', title:'Type address', onClick:function(){ document.getElementById('addrInput').value=''; addrTarget='pickup'; show('typeAddr'); } }));
   el.appendChild(station({ letter:'V', color:'#B933AD', title:'Say address', onClick:function(){ sayAddress(); } }));
   el.appendChild(station({ letter:'→', color:'#00933C', title:intake.stops.length?'Continue':'Skip · my location', express:true, onClick:function(){ goWhere(); } }));
@@ -360,8 +362,7 @@ function geocodeThenPreview(q, target){
   addrTarget=target||'stop';
   nominatimGeocode(q).then(function(j){
     pendingStop={lat:j.lat,lng:j.lng,addr:(j.addr||q)};
-    if(j.confident){ addrConfirm(); }          // exact match: skip the preview, just add it
-    else { renderAddrPreview(); }               // fuzzy match: show "Did you mean"
+    renderAddrPreview();   // always show "Did you mean" + Save address (so saving works for every address, exact or fuzzy)
   }).catch(function(e){ toast('could not find: '+e.message); if(addrTarget==='pickup') goPickup(); else goWhere(); });
 }
 function useCurrentLocation(){
@@ -383,16 +384,24 @@ function renderAddrPreview(){
 }
 function addrConfirm(){ if(!pendingStop) return; if(addrTarget==='pickup'){ intake.pickup=pendingStop; } else { intake.stops.push(pendingStop); } pendingStop=null;
   if(addrTarget==='pickup') goWhere(); else renderStops(); show('where'); }
-function savePrompt(){
+function savePrompt(mode){
   if(!pendingStop) return;
+  mode = mode || addrTarget;   // 'pickup' or 'stop'
   showPrompt('Save as', 'Name this place', function(name){
     showPrompt('Aliases', 'Other names? (comma-separated, optional)', function(aliasStr){
       name=name.trim();
-      if(!name) return;
+      if(!name){ if(mode==='pickup') goPickup(); else goWhere(); return; }
       var aliases=(aliasStr||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
-      var route={ name:name, aliases:aliases,
-        dropoff:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr},
-        pickup:(intake.pickup&&intake.pickup.lat)?{lat:intake.pickup.lat,lng:intake.pickup.lng,addr:intake.pickup.addr}:null };
+      var route;
+      if(mode==='pickup'){
+        route={ name:name, aliases:aliases,
+          dropoff:(intake.stops.length?intake.stops[0]:null) && intake.stops[0].lat ? {lat:intake.stops[0].lat,lng:intake.stops[0].lng,addr:intake.stops[0].addr} : null,
+          pickup:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr} };
+      } else {
+        route={ name:name, aliases:aliases,
+          dropoff:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr},
+          pickup:(intake.pickup&&intake.pickup.lat)?{lat:intake.pickup.lat,lng:intake.pickup.lng,addr:intake.pickup.addr}:null };
+      }
       // Dedupe: update an existing route with the same name/alias instead of creating a twin
       var existing=findBestRoute(name);
       if(existing){
@@ -403,13 +412,17 @@ function savePrompt(){
         routes.push(route);
       }
       saveRoutes(); toast('saved '+name);
-      addrConfirm();
+      var ret=saveReturn; saveReturn=null;
+      if(ret){ ret(); return; }
+      // return to the screen that launched the save
+      if(mode==='pickup'){ intake.pickup=pendingStop; goWhere(); }
+      else { addrConfirm(); }
     }, 'promptModal');
-  }, addrTarget==='pickup'?'pickup':'where');
+  }, mode==='pickup'?'pickup':'where');
 }
 
 // ---------- inline prompt modal (replaces blocking prompt()) ----------
-var promptCallback=null, promptBackTo=null;
+var promptCallback=null, promptBackTo=null, saveReturn=null;
 function showPrompt(label, title, cb, backTo){
   document.getElementById('promptLabel').textContent=label||'';
   document.getElementById('promptTitle').textContent=title||'';
@@ -443,9 +456,12 @@ function goConfirm(){
   var dest=intake.stops[intake.stops.length-1].addr;
   document.getElementById('confirmAddr').textContent=dest;
   fitMarquee(document.getElementById('confirmAddrWrap'), document.getElementById('confirmAddr'));
-  document.getElementById('confirmWhen').textContent = intake.when ? new Date(intake.when).toLocaleString() : 'Now';
+  var whenTxt = intake.when ? new Date(intake.when).toLocaleString() : 'Now';
+  document.getElementById('confirmWhen').textContent = 'When: ' + whenTxt;
   document.getElementById('confirmFrom').textContent = intake.pickup ? 'From: '+shortAddr(intake.pickup.addr) : 'From: my location';
-  show('confirm'); registerList([document.getElementById('confirmReq')]);
+  var req=document.getElementById('confirmReq');
+  req.querySelector('.s').textContent = intake.when ? 'scheduled · press ●' : 'press ●';
+  show('confirm'); registerList([req]);
 }
 function selfRide(){ doRequest(); }
 function doRequest(){
@@ -454,7 +470,12 @@ function doRequest(){
   fitMarquee(document.getElementById('qrTitleWrap'), document.getElementById('qrTitle'));
   var box=document.getElementById('qr'); box.innerHTML='';
   try { var q=window.qrcode(0,'M'); q.addData(link); q.make(); box.innerHTML=q.createImgTag(4,6); } catch(e){ box.innerHTML='<div class="muted" style="color:#000">qr lib missing</div>'; }
-  var hr=homeRoute(); document.getElementById('qrNote').textContent = hr ? 'Scan · or swipe ⟵ / hold ⌂ for Home' : 'Scan with your phone · you confirm in Uber';
+  var hr=homeRoute();
+  var whenNote = intake.when ? 'Scheduled: ' + new Date(intake.when).toLocaleString() + ' (set in Uber)' : 'Ride now';
+  document.getElementById('qrNote').textContent = whenNote + (hr ? ' · swipe ⟵ / hold ⌂ Home' : ' · scan & confirm in Uber');
+  // Save-route row: persist this destination (and pickup) as a named route
+  var ql=document.getElementById('qrList'); ql.innerHTML='';
+  ql.appendChild(station({ letter:'S', color:'#2850AD', title:'Save route', sub:'keep this destination', onClick:function(){ pendingStop={lat:intake.stops[intake.stops.length-1].lat,lng:intake.stops[intake.stops.length-1].lng,addr:intake.stops[intake.stops.length-1].addr}; addrTarget='stop'; saveReturn=function(){ doRequest(); }; savePrompt('stop'); } }));
   show('qrview');
 }
 
