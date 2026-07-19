@@ -1,73 +1,92 @@
 # Uber Routes for Rabbit R1 — Handoff
 
-_Last updated: 2026-07-18 (guest rides stripped from main — self-ride only for now)_
+_Last updated: 2026-07-18 (creation is now fully client-side / backend-free, hosted on GitHub Pages)_
 _Project root: `C:\Users\travi\Documents\R1-projects\uber-routes\`_
-_Now a git repo (initialized this session). Branches: `master` (active, self-ride only), `guest-rides-deeplink` (preserves the deep-link-based guest-ride attempt described below, for later)._
+_Git repo: `https://github.com/travisbrant1-cyber/uber-routes` (public). Branches: `master` (active, client-side self-ride), `guest-rides-deeplink` (preserves the deep-link-based guest-ride attempt, parked)._
 
 ## 1. Goal
 A Rabbit R1 "creation" (240×282 WebView web app) that lets you summon Uber rides by **voice or buttons**, using saved standard routes like *"Take me to Work"*.
 
-Originally required "rides for someone else" too (e.g. *"Take Josh to Work"*, Uber texts Josh). **That's currently out of scope on `master`** — see §3 for why, and the `guest-rides-deeplink` branch for the parked attempt.
+Originally required "rides for someone else" too (e.g. *"Take Josh to Work"*, Uber texts Josh). **That's out of scope on `master`** — see §3 for why, and the `guest-rides-deeplink` branch for the parked attempt.
 
-Still-active required features:
-- Saved, named routes (Home, Work, unlimited, with aliases). Add/edit/delete on a phone, not the tiny screen.
-- Trigger by voice phrase **or** buttons.
-- **Scheduling** ("tomorrow 8am") — display/reminder only, see the limitation noted in §3.
+Still-active required features (all working):
+- Saved, named routes (Home, Work, unlimited, with aliases). Add/edit/delete **on the R1 itself** (no separate phone page needed anymore).
+- Trigger by voice phrase **or** buttons/scroll-wheel.
+- **Scheduling display** ("tomorrow 8am") — reminder only; deep links can't carry a pickup time (see §3).
 - An **intake wizard** on the R1 that collects ride details and builds a `m.uber.com` deep link + QR.
 
-## 2. How it works (architecture)
-Three pieces, all in this repo:
+## 2. How it works (architecture) — NOW FULLY CLIENT-SIDE
+As of the latest commit the creation has **no backend dependency**. It is a single static file served from GitHub Pages.
 
 | Folder | File | Role |
 |---|---|---|
-| `r1/` | `index.html` | The R1 creation. 240×282, bridge feature-detected. Wizard: **+ NEW RIDE** → Pickup → Where → When → Confirm → a `m.uber.com` deep link + QR, built entirely client-side. Self-ride only. |
+| `r1/` | `index.html` | The R1 creation source (authoring copy). 240×282, bridge feature-detected. Wizard: **+ NEW RIDE** → Pickup → Where → When → Confirm → `m.uber.com` deep link + QR. |
 | `r1/` | `qrcode.js` | `qrcode-generator` lib for rendering the ride QR. |
-| `backend/` | `server.js` | Node backend. **Never talks to Uber's API at all** — just geocoding (Nominatim) and JSON storage for saved routes. |
-| `backend/` | `data.json` | Persisted routes only (no more guests — see §3). |
-| `setup/` | `index.html` | Phone-side page to add/edit/delete routes (with aliases). Geocodes addresses. |
+| `setup/` | `index.html` | **ORPHANED.** Old phone-side route manager that talked to the backend. Unused now that the creation manages its own routes via `creationStorage`. Kept in repo per request; safe to delete later. |
+| `backend/` | `server.js`, `data.json` | **ORPHANED.** Old Node backend (Nominatim geocode + route storage). No longer called by the creation. Kept in repo per request; safe to delete later. |
+| root | `index.html` | **The file GitHub Pages actually serves** (gh-pages branch root). Published from `r1/index.html` via `git show master:r1/index.html`. |
+| root | `install-qr.png` | Install QR (scannable by the R1 camera) → points at the Pages URL. |
 
-R1 assembles `https://m.uber.com/looking?pickup=...&drop[i]=...` client-side and shows a QR. You scan with your phone, Uber opens prefilled, **you tap confirm**. No backend call, no token, no business account. If the ride was scheduled for later, the QR screen just reminds you to set the time manually in Uber — deep links can't carry a pickup time.
+**What runs where (no server):**
+- **Geocoding** → Nominatim (OpenStreetMap) called **directly from the creation** via `fetch` to `https://nominatim.openstreetmap.org/search?format=jsonv2` (CORS-enabled, no API key). `nominatimGeocode()` / `nominatimReverse()` in `r1/index.html`.
+- **Saved routes** → `window.creationStorage.plain` (Base64, per-plugin, as the R1 bridge requires). `loadRoutes()` / `saveRoutes()`. No server, persists on-device.
+- **Ride** → `buildSelfLink()` assembles `https://m.uber.com/looking?pickup=...&drop[i]=...` client-side; `doRequest()` renders the QR. You scan with your phone, Uber opens prefilled, **you tap confirm**. No token, no business account, no backend.
 
-## 3. Why guest rides were removed (read this before resurrecting them)
-This took two failed approaches this session, in order:
+**Why this is robust:** the only external calls are (a) Nominatim for geocoding and (b) `m.uber.com` for the final ride. Both are public, keyless, CORS-friendly. There is no secret to leak and nothing to keep running.
 
-1. **Uber Guest Rides API** (`/v1/guests/trips`) — the "correct" way to book a ride for someone else with automatic SMS + real scheduling. Requires an **Uber for Business/Central account + OAuth app** — a real external dependency that was never obtained. Removed from the codebase entirely (was in `backend/server.js`: `buildPayload()`, `createTrip()`, `POST /ride`).
-2. **Deep link + manual picker fallback** — since deep links can't specify a recipient, the idea was: build the same self-ride deep link, but show an on-screen reminder to manually pick the recipient inside Uber's own "request for someone else" feature (which is free on any consumer account, no business account needed) once the app opens. **Tested on a real device and confirmed broken**: opening the `m.uber.com` deep link launched the **mobile web UI**, not the native app, landed on a generic login-gated "Get a ride" page with **no prefilled locations**, and the rider-picker wasn't meaningfully reachable in that flow either. Also tried the alternate `action=setPickup` deep link format (vs. `/looking`) hoping it would stop at an earlier, less-committed screen — same result: web UI, no prefill, no working handoff to the native app.
+## 3. Why guest rides were removed (read before resurrecting)
+Two failed approaches this session:
+1. **Uber Guest Rides API** (`/v1/guests/trips`) — needs an **Uber for Business/Central account + OAuth app** (never obtained). Removed from `master`.
+2. **Deep link + manual picker fallback** — tested on-device, confirmed broken: `m.uber.com` deep links open the mobile web UI (not native app), no prefill, rider-picker unreachable.
 
-Given neither approach works right now, guest-ride support was **fully stripped from `master`** (user's call) rather than left half-working. Everything from attempt #2 — the guest wizard step, the reminder-note QR logic, the guest data model (aliases-aware `matchesName`, guest CRUD endpoints, the People section in `/setup`) — is preserved as-is on the **`guest-rides-deeplink` branch**, checked out from the commit right before the strip. Nothing was lost; it just isn't in the active app.
+Guest-ride code is preserved on **`guest-rides-deeplink`** (nothing lost). To revisit: get Business/Guest Rides API access (also restores real scheduling), or find a deep-link variant that reaches the native app with prefill + reachable rider-picker.
 
-**If this is ever worth revisiting**, the real options are: (a) get Uber for Business/Guest Rides API access and resurrect approach #1 (cleaner, since it also gets you real scheduling back), or (b) find a deep link / universal link variant that actually reaches the native app with prefilled locations *and* leaves the rider-picker reachable (both tested variants failed — worth checking Uber's changelog/docs again later, or asking Uber support directly, before trying a third variant blind).
+**Real scheduling** ("tomorrow 8am" actually requested at that time) has the same root cause — deep links can't carry a pickup time; only the Guest Rides API could. Currently the When step is display-only (the QR reminds you to set the time in Uber).
 
-## 4. Where we are (status)
+## 4. Status
 **Working and verified:**
-- Full self-ride wizard: **+ NEW RIDE** → Pickup (current location/saved/typed/spoken, skippable) → Where (multi-stop, saved/typed/spoken, with a confident-match auto-skip of the "did you mean" screen) → When (display-only scheduling) → Confirm → QR. Also a one-tap quick-self-ride from the Home screen's saved-places list.
-- Voice phrase shortcut (`askLLM`/`onPluginMessage`) parses a spoken phrase against known routes (including aliases) and jumps straight to a QR; has a 12s timeout with a clear fallback message since the on-device LLM bridge is known-unreliable (never assume `onPluginMessage` fires).
-- Saved routes: add from the wizard (`💾 Save address`, with optional aliases) or from `/setup` (full add/edit/delete, aliases input). Aliases let one place answer to multiple names ("Home"/"House") via voice, the Home screen, and the Pickup screen's saved-pickup list.
-- "🏠 Ride home" shortcut on the QR screen: one tap rebuilds a fresh QR to whatever route is named/aliased "home"; hidden if none saved.
-- Layout: single-line scrolling marquee (`.marquee`/`fitMarquee()`) keeps long addresses from ever pushing the QR code off the fixed 282px screen — this actually happened before the fix (QR fully invisible with a real 6-line address) and is verified fixed via `getBoundingClientRect()`, not just screenshots (this browser preview tool renders screenshots at a misleading scale — trust the rects). Header also fixed from a silent 2-line wrap that was eating ~20px on every screen.
-- Backend is now genuinely minimal: `/config` (just `clientId`), `/routes` (GET/POST/PUT/DELETE by id), `/geocode`, `/reverse-geocode`. No env vars required to run it.
-- Git repo initialized this session; `master` has this self-ride-only state, `guest-rides-deeplink` preserves the fuller (but broken) guest-ride attempt.
+- Full self-ride wizard: **+ NEW RIDE** → Pickup (current location / saved / typed / spoken, skippable) → Where (multi-stop, saved / typed / spoken) → When → Confirm → QR. One-tap quick-ride from the Home list.
+- **Confident-match auto-skip:** exact geocodes (building with a house number, or Nominatim importance > 0.6) add instantly without the "Did you mean" screen; fuzzy matches still preview. (This fast-path was dropped in the MTA redesign and restored with Option 2.)
+- Voice phrase shortcut (`askLLM`/`onPluginMessage`) parses a spoken phrase against known routes + aliases and jumps to a QR. 12s timeout + fallback message (on-device LLM bridge is known-unreliable).
+- Saved routes: add from the wizard ("Save address", optional aliases) or quick-save; persisted in `creationStorage`. Aliases let one place answer to multiple names ("Home"/"House").
+- "Ride home" on the QR screen: rebuilds a QR to whatever route is named/aliased "home"; hidden if none saved.
+- MTA subway-map UI: black/Helvetica, colored station bullets (MTA palette), scroll-wheel selection + side-button confirm + swipe (right=back, left=forward) + long-press (QR view → Ride home; elsewhere → cancel). Transit-line progress bar. Exactly 282px (header 22 + progress 16 + list 230 + tip 14 = 282; QR screen 282).
+- **Fully client-side / backend-free** (Option 2): 0 `BACKEND` references in the shipped file; geocoding and route storage run on-device. No red status dot, no server to keep alive.
+- **Hosted + installable:** GitHub Pages (`gh-pages` branch) serves the creation; `install-qr.png` is a scannable install QR. Live URL verified 200, backend-free.
 
-**NOT done / blocked:**
-- No auth on the backend (open on the internet if exposed). Add before public hosting.
-- R1 `BACKEND` constant points at `location.origin`; for device testing it must be set to a tunnel/URL reachable by the R1.
-- On-device voice round-trip and the "Use current location" GPS path not manually tested on real hardware (no R1 attached; this sandboxed preview browser has geolocation permission permanently denied with no way to grant it).
-- Guest/"for someone else" rides — see §3. Genuinely blocked pending either Business API access or a working deep-link variant, not just unimplemented.
-- Real scheduling ("tomorrow 8am" actually requested at that time, not just a reminder) — same root cause as guest rides: deep links can't do it, only the Guest Rides API could.
+**Ad-hoc verified (10/10 loader checks):** script parses; no backend refs; deeplink builder correct (my_location when no pickup, multi-stop); name/alias match; `nominatimGeocode`/`saveRoutes`/`loadRoutes` defined; boot backend-free. Live Nominatim returns valid coords. QR decode-verified against the exact Pages URL.
 
-## 5. Run it
+**NOT done / caveats:**
+- On-device voice round-trip and "Use current location" GPS not manually tested on real hardware (no R1 attached; sandbox geolocation denied).
+- **Nominatim rate limit** (~1 req/s, no key) — fine for personal use, not high volume.
+- `setup/` and `backend/` are orphaned (see §2) — kept per request.
+- Guest/"for someone else" rides + real scheduling — blocked pending Business API access (§3).
+
+## 5. Run / deploy
+**The creation is live — no local server needed:**
 ```
-cd C:\Users\travi\Documents\R1-projects\uber-routes\backend
-node server.js
-# http://localhost:8788/        -> the R1 creation
-# http://localhost:8788/setup   -> add/edit/delete routes
+https://travisbrant1-cyber.github.io/uber-routes/
 ```
-No env vars required. `UBER_CLIENT_ID` is optional (decorates the deep link if you have one).
+Install on the R1: open `install-qr.png` (repo root) and scan it with the R1 camera, OR point the R1's creation loader at the URL above.
 
-To look at the parked guest-ride attempt: `git checkout guest-rides-deeplink` (then `git checkout master` to come back — don't develop new work on the branch without merging intentionally, it'll diverge).
+**Local dev / edit:**
+```
+# edit r1/index.html, then publish to Pages:
+cd C:\Users\travi\Documents\R1-projects\uber-routes
+git add r1/index.html && git commit -m "..." && git push origin master
+git checkout gh-pages
+git show master:r1/index.html > index.html
+git add index.html && git commit -m "publish" && git push origin gh-pages
+git checkout master
+# GitHub Pages rebuilds in ~30-60s
+```
+(Regenerate `install-qr.png` only if the URL changes — it hasn't.)
+
+To inspect the parked guest attempt: `git checkout guest-rides-deeplink` (then `git checkout master` to return).
 
 ## 6. Next steps
-- [ ] Add backend auth (token/header) before exposing publicly.
-- [ ] Point R1 `BACKEND` at a tunnel URL; test the full voice flow and "Use current location" on a real device / Boondit emulator.
-- [ ] Optional dev self-test button to fake `onPluginMessage` so the flow can be watched without speaking.
-- [ ] Decide whether to pursue Uber for Business / Guest Rides API access — that's the one path back to real guest rides *and* real scheduling in one move (see §3).
+- [ ] Manual on-device test: voice phrase, "Use current location" GPS, and a real scan-to-Uber ride on the R1 / Boondit emulator.
+- [ ] Watch Nominatim rate limits under real use; add a tiny client-side cache if needed.
+- [ ] Decide on Uber for Business / Guest Rides API — the one path back to real guest rides *and* real scheduling (§3).
+- [ ] Optional: delete orphaned `backend/` + `setup/` once confident they're not needed.
+- [ ] Update `HANDOFF.md` (this file) whenever the architecture changes again.
