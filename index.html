@@ -1,6 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+/* R1 emulator bridge shim — no-op when not embedded in an iframe (on-device safe). */
+(function(){
+  if(window.parent===window) return;
+  var EVENTS=["scrollUp","scrollDown","sideClick","longPressStart","longPressEnd"];
+  window.addEventListener("message",function(e){
+    var d=e.data; if(!d||d.__r1emu!==true) return;
+    if(d.type==="event"&&EVENTS.indexOf(d.event)!==-1){ window.dispatchEvent(new CustomEvent(d.event,{detail:d.detail})); }
+    else if(d.type==="pluginMessage"&&typeof window.onPluginMessage==="function"){ window.onPluginMessage(d.payload); }
+  });
+  function relay(name){ return { postMessage: function(msg){ window.parent.postMessage({__r1emu:true,type:"outbound",channel:name,msg:msg},"*"); } }; }
+  window.PluginMessageHandler=relay("PluginMessageHandler");
+  window.CreationVoiceHandler=relay("CreationVoiceHandler");
+  window.closeWebView=relay("closeWebView");
+})();
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
 <title>Uber Routes</title>
@@ -29,13 +45,13 @@
   /* ---- screens ---- */
   #view { flex:1; overflow:hidden; position:relative; }
   .screen { position:absolute; inset:0; display:flex; flex-direction:column; }
-  .list { flex:1; overflow-y:auto; padding:6px 0 6px 0; position:relative; }
+  .list { flex:1; overflow:hidden; position:relative; padding:6px 0 6px 0; }
   /* ---- station row ---- */
-  .row { position:relative; min-height:42px; display:flex; align-items:center; padding:4px 10px 4px 38px; }
+  .row { position:relative; min-height:44px; display:flex; align-items:center; padding:4px 10px 4px 38px; }
   .row::before { content:""; position:absolute; left:21px; top:24px; bottom:0; width:2px; background:#2a2a2a; }
   .row:first-child::before { top:24px; }
   .row:last-child::before { bottom:18px; }
-  .bullet { position:absolute; left:11px; top:50%; transform:translateY(-50%); width:20px; height:20px;
+  .bullet { position:absolute; left:11px; top:50%; transform:translateY(-50%); width:22px; height:22px; min-width:22px; min-height:22px;
     border-radius:50%; background:#444; color:#fff; display:flex; align-items:center; justify-content:center;
     font-size:11px; font-weight:bold; z-index:2; box-shadow:0 0 0 2px #000; }
   .meta { display:flex; flex-direction:column; line-height:1.15; }
@@ -67,6 +83,9 @@
     background:#0a0a0a; border-top:1px solid #161616; text-transform:uppercase; line-height:14px; }
   .toast { position:absolute; left:0; right:0; bottom:18px; padding:7px; background:#FCCC0A; color:#000;
     font-size:11px; text-align:center; font-weight:bold; }
+  .loading::after { content:''; position:fixed; top:50%; left:50%; width:8px; height:8px; border-radius:50%;
+    background:#FCCC0A; animation:pulse 1s ease-in-out infinite; z-index:200; transform:translate(-50%,-50%); }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
   .poster { padding:10px; text-align:center; }
   .poster .lbl { font-size:10px; color:#8a8a8a; letter-spacing:.1em; text-transform:uppercase; }
 </style>
@@ -148,6 +167,16 @@
       <div class="tip" id="qrTip">● HOME · HOLD ⌂ / SWIPE⟵ RIDE HOME</div>
     </div>
 
+    <!-- PROMPT MODAL (replaces blocking prompt()) -->
+    <div class="screen" id="promptModal" style="display:none">
+      <div class="center" style="padding-top:30px">
+        <div class="lbl" id="promptLabel" style="font-size:10px;color:#8a8a8a;letter-spacing:.1em;text-transform:uppercase"></div>
+        <div class="big" id="promptTitle" style="margin:8px 0"></div>
+        <div class="field"><input id="promptInput" type="text" autocomplete="off" placeholder=""></div>
+      </div>
+      <div class="tip">HOLD ● CONFIRM · SWIPE ⟶ CANCEL</div>
+    </div>
+
   </div>
   <div class="toast" id="toast" style="display:none"></div>
 </div>
@@ -170,31 +199,52 @@ var selItems = [], sel = 0;
 function registerList(els){ selItems = Array.prototype.slice.call(els||[]); sel = 0; paint(); ensureVis(); }
 function paint(){ selItems.forEach(function(e,i){ e.classList.toggle('sel', i===sel); }); }
 function moveSel(d){ if(!selItems.length) return; sel += d; if(sel<0) sel=selItems.length-1; if(sel>=selItems.length) sel=0; paint(); ensureVis(); }
-function ensureVis(){ var e=selItems[sel]; if(e && e.scrollIntoView) e.scrollIntoView({block:'nearest'}); }
+function ensureVis(){ var e=selItems[sel]; if(!e) return;
+  var list=e.closest ? e.closest('.list') : (e.parentNode && e.parentNode.classList && e.parentNode.classList.contains('list') ? e.parentNode : null);
+  if(!list) return;
+  var listH=list.clientHeight||220; var rowH=e.offsetHeight||44;
+  var maxVisible=Math.max(1,Math.floor(listH/rowH));
+  var target=Math.max(0,(sel-Math.floor(maxVisible/2))*rowH);
+  list.scrollTop=target; }
 function activate(){ var e=selItems[sel]; if(e) e.click(); }
 function visId(){ var v=document.querySelector('.screen[style*="flex"]'); return v?v.id:null; }
 
 // ---------- storage (client-side, no backend) ----------
-function loadRoutes(){ if(!HAS.store) return Promise.resolve();
-  return window.creationStorage.plain.getItem('routes').then(function(b){ if(b){try{routes=JSON.parse(atob(b));}catch(e){}} }); }
-function saveRoutes(){ if(!HAS.store) return; window.creationStorage.plain.setItem('routes',btoa(JSON.stringify(routes))); }
+function safeStore(key, val){ if(!HAS.store) return Promise.resolve();
+  return window.creationStorage.plain.setItem(key, val).catch(function(e){ console.warn('storage fail:',e); toast('save failed'); }); }
+function safeLoad(key){ if(!HAS.store) return Promise.resolve(null);
+  return window.creationStorage.plain.getItem(key).catch(function(e){ console.warn('storage fail:',e); return null; }); }
+function loadRoutes(){ return safeLoad('routes').then(function(b){ if(b){try{routes=JSON.parse(atob(b));}catch(e){}} return; }); }
+function saveRoutes(){ if(!HAS.store) return; safeStore('routes', btoa(JSON.stringify(routes))); }
 
 // ---------- geocode via Nominatim (direct, no key, CORS-enabled) ----------
+function fetchWithTimeout(url, opts, ms){
+  return Promise.race([ fetch(url, opts),
+    new Promise(function(_, reject){ setTimeout(function(){ reject(new Error('timeout')); }, ms||8000); }) ]);
+}
 function nominatimGeocode(q){
+  document.body.classList.add('loading');
   var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=' + encodeURIComponent(q);
-  return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(r){return r.json();}).then(function(j){
-    if(!j || !j.length) throw new Error('no match');
-    var hit=j[0];
-    var confident = !!(hit.address && hit.address.house_number) || parseFloat(hit.importance||0) > 0.6;
-    return { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon), addr: hit.display_name, confident: confident };
-  });
+  return fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 8000)
+    .then(function(r){ return r.json(); }).then(function(j){
+      if(!j || !j.length) throw new Error('no match');
+      var hit=j[0];
+      var confident = !!(hit.address && hit.address.house_number) || parseFloat(hit.importance||0) > 0.6;
+      return { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon), addr: hit.display_name, confident: confident };
+    })
+    .then(function(res){ document.body.classList.remove('loading'); return res; })
+    .catch(function(e){ document.body.classList.remove('loading'); throw e; });
 }
 function nominatimReverse(lat, lng){
+  document.body.classList.add('loading');
   var url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng);
-  return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(r){return r.json();}).then(function(j){
-    if(!j || !j.display_name) throw new Error('no match');
-    return j.display_name;
-  });
+  return fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 8000)
+    .then(function(r){ return r.json(); }).then(function(j){
+      if(!j || !j.display_name) throw new Error('no match');
+      return j.display_name;
+    })
+    .then(function(res){ document.body.classList.remove('loading'); return res; })
+    .catch(function(e){ document.body.classList.remove('loading'); throw e; });
 }
 
 // ---------- station builder ----------
@@ -212,8 +262,12 @@ function collect(listEl){ return Array.prototype.slice.call(listEl.querySelector
 // ---------- screens ----------
 var WIZ = ['pickup','where','when','confirm'];
 function show(id){
-  ['home','pickup','where','typeAddr','addrPreview','when','confirm','qrview'].forEach(function(s){
-    document.getElementById(s).style.display=(s===id)?'flex':'none'; });
+  ['home','pickup','where','typeAddr','addrPreview','when','confirm','qrview','promptModal'].forEach(function(s){
+    var el=document.getElementById(s); if(!el) return;
+    var vis=(s===id);
+    el.style.display=vis?'flex':'none';
+    el.querySelectorAll('.marquee').forEach(function(m){ m.style.animationPlayState = vis?'running':'paused'; });
+  });
   if(id!=='home' && WIZ.indexOf(id)>=0) setProg(WIZ.indexOf(id));
   if(id==='home'){ renderHome(); }   // re-render + re-register selection model (was clearing selItems, breaking scroll/PTT)
 }
@@ -300,7 +354,7 @@ function pickRoute(){
 
 // ---------- address input -> geocode -> preview ----------
 function typeAddrGo(){ var v=document.getElementById('addrInput').value.trim(); if(!v){ toast('type something'); return; } geocodeThenPreview(v, addrTarget); }
-function sayAddress(){ expect='address'; if(!HAS.msg){ var a=prompt('Address:'); if(a) geocodeThenPreview(a,'stop'); return; } toast('speak the address…');
+function sayAddress(){ expect='address'; if(!HAS.msg){ showPrompt('Destination', 'Address', function(a){ if(a) geocodeThenPreview(a,'stop'); }); return; } toast('speak the address…');
   PluginMessageHandler.postMessage(JSON.stringify({ message:"The user is about to say a destination. Reply with ONLY the raw address text they say, nothing else.", useLLM:true, wantsR1Response:false })); }
 function geocodeThenPreview(q, target){
   addrTarget=target||'stop';
@@ -331,13 +385,45 @@ function addrConfirm(){ if(!pendingStop) return; if(addrTarget==='pickup'){ inta
   if(addrTarget==='pickup') goWhere(); else renderStops(); show('where'); }
 function savePrompt(){
   if(!pendingStop) return;
-  var name=prompt('Name this place:'); if(!name) return;
-  var aliasStr=prompt('Any other names? (comma-separated, optional):')||'';
-  var aliases=aliasStr.split(',').map(function(s){return s.trim();}).filter(Boolean);
-  var route={ name:name.trim(), aliases:aliases, dropoff:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr},
-    pickup:(intake.pickup&&intake.pickup.lat)?{lat:intake.pickup.lat,lng:intake.pickup.lng,addr:intake.pickup.addr}:null };
-  routes.push(route); saveRoutes(); toast('saved '+name);
-  addrConfirm();
+  showPrompt('Save as', 'Name this place', function(name){
+    showPrompt('Aliases', 'Other names? (comma-separated, optional)', function(aliasStr){
+      name=name.trim();
+      if(!name) return;
+      var aliases=(aliasStr||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
+      var route={ name:name, aliases:aliases,
+        dropoff:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr},
+        pickup:(intake.pickup&&intake.pickup.lat)?{lat:intake.pickup.lat,lng:intake.pickup.lng,addr:intake.pickup.addr}:null };
+      // Dedupe: update an existing route with the same name/alias instead of creating a twin
+      var existing=findBestRoute(name);
+      if(existing){
+        var idx=routes.indexOf(existing);
+        route.aliases=route.aliases.concat(existing.aliases.filter(function(a){return route.aliases.indexOf(a)<0;}));
+        routes[idx]=route;
+      } else {
+        routes.push(route);
+      }
+      saveRoutes(); toast('saved '+name);
+      addrConfirm();
+    }, 'promptModal');
+  }, addrTarget==='pickup'?'pickup':'where');
+}
+
+// ---------- inline prompt modal (replaces blocking prompt()) ----------
+var promptCallback=null, promptBackTo=null;
+function showPrompt(label, title, cb, backTo){
+  document.getElementById('promptLabel').textContent=label||'';
+  document.getElementById('promptTitle').textContent=title||'';
+  document.getElementById('promptInput').value='';
+  promptCallback=cb; promptBackTo=backTo||visId();
+  show('promptModal');
+  setTimeout(function(){ var i=document.getElementById('promptInput'); if(i&&i.focus) i.focus(); }, 50);
+}
+function confirmPrompt(){
+  var val=document.getElementById('promptInput').value.trim();
+  var cb=promptCallback, back=promptBackTo;
+  promptCallback=null; promptBackTo=null;
+  if(val && cb) cb(val);
+  else if(back) show(back);
 }
 
 // ---------- WHEN ----------
@@ -347,7 +433,7 @@ function goWhen(){ var el=document.getElementById('whenList'); el.innerHTML='';
   el.appendChild(station({ letter:'V', color:'#B933AD', title:'Say a time', onClick:function(){ sayTime(); } }));
   registerList(collect(el)); }
 function tomorrowAt(h,m){ var d=new Date(); d.setDate(d.getDate()+1); d.setHours(h,m,0,0); return d.getTime(); }
-function sayTime(){ expect='time'; if(!HAS.msg){ var t=prompt('When?'); if(t) parseTime(t); return; } toast('speak the time…');
+function sayTime(){ expect='time'; if(!HAS.msg){ showPrompt('When', 'Time (e.g. 8am)', function(t){ if(t) parseTime(t); }); return; } toast('speak the time…');
   PluginMessageHandler.postMessage(JSON.stringify({ message:"The user will say a time. Convert to epoch ms and reply with ONLY that number.", useLLM:true, wantsR1Response:false })); }
 function parseTime(phrase){ if(!HAS.msg){ var m=phrase.match(/(\d{1,2})\s*(am|pm)?/i); var h=m?parseInt(m[1]):8; if(m&&/pm/i.test(m[2])&&h<12)h+=12; intake.when=tomorrowAt(h,0); goConfirm(); return; } }
 
@@ -392,7 +478,7 @@ function fitMarquee(wrap, big){
 }
 
 // ---------- voice phrase shortcut ----------
-function sayPhrase(){ if(!HAS.msg){ var p=prompt('Say a ride (e.g. "Home"):'); if(p) askLLM(p); return; } toast('speak the ride…'); }
+function sayPhrase(){ if(!HAS.msg){ showPrompt('Ride', 'Say a ride (e.g. "Home")', function(p){ if(p) askLLM(p); }); return; } toast('speak the ride…'); }
 function askLLM(phrase){ expect='phrase'; if(!HAS.msg){ toast('LLM bridge unavailable'); return; }
   var known=routes.map(function(r){return [r.name].concat(r.aliases||[]).join('/');}).join(', ');
   var prompt='You are a ride dispatcher. Known routes: '+known+'. Return ONLY JSON: {"route":string|null,"when":epoch ms or null}. route=null if unknown. Parse times like "tomorrow 8am". Phrase: "'+phrase+'"';
@@ -403,7 +489,7 @@ window.onPluginMessage=function(data){
   if(expect==='time'){ var n=parseInt(String(raw||dt).replace(/[^0-9]/g,''),10); if(!n){ toast('couldn\'t parse time'); expect=null; return; } intake.when=n; expect=null; goConfirm(); return; }
   var parsed=null; try{ parsed=JSON.parse(dt); }catch(e){ try{ parsed=JSON.parse(raw); }catch(_){} }
   if(!parsed||!parsed.route){ toast('no saved place matches'); expect=null; return; }
-  var r=routes.find(function(x){return routeMatchesName(x,parsed.route);}); if(!r){ toast('no route "'+parsed.route+'"'); expect=null; return; }
+  var r=findBestRoute(parsed.route); if(!r){ toast('no route "'+parsed.route+'"'); expect=null; return; }
   intake={ riderType:'me', rider:null, stops:[{lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}],
     pickup:(r.pickup&&r.pickup.lat)?{lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}:null, when:parsed.when||null };
   if(intake.when) goConfirm(); else quickSelf(r);
@@ -412,6 +498,7 @@ window.onPluginMessage=function(data){
 
 // ---------- navigation (gestures) ----------
 function goBack(){ var v=visId();
+  if(v==='promptModal'){ if(promptBackTo) show(promptBackTo); return; }
   if(v==='pickup') show('home');
   else if(v==='where') goPickup();
   else if(v==='typeAddr') (addrTarget==='pickup'?goPickup():goWhere());
@@ -422,6 +509,7 @@ function goBack(){ var v=visId();
   else show('home');
 }
 function goForward(){ var v=visId();
+  if(v==='promptModal'){ confirmPrompt(); return; }
   if(v==='home') startWizard();
   else if(v==='pickup') goWhere();
   else if(v==='where'){ if(intake.stops.length) goWhen(); else toast('add a stop first'); }
@@ -447,6 +535,7 @@ window.addEventListener('scrollDown', function(){ moveSelDebounced(1); });
 window.addEventListener('wheel', function(e){ moveSelDebounced(e.deltaY<0?-1:1); }, { passive:true });
 window.addEventListener('sideClick', function(){
   var v=visId();
+  if(v==='promptModal'){ confirmPrompt(); return; }
   if(v==='typeAddr'){ typeAddrGo(); return; }
   if(v==='confirm'){ doRequest(); return; }
   if(v==='qrview'){ show('home'); return; }
@@ -454,6 +543,7 @@ window.addEventListener('sideClick', function(){
 });
 window.addEventListener('longPressStart', function(){
   var v=visId();
+  if(v==='promptModal'){ if(promptBackTo) show(promptBackTo); return; }
   if(v==='qrview'){ rideHome(); }
   else if(['pickup','where','when','confirm','addrPreview','typeAddr'].indexOf(v)>=0){ show('home'); }
 });
@@ -481,6 +571,16 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){retur
 function shortAddr(a){ if(!a) return ''; var p=a.split(','); return p.slice(0,2).join(', '); }
 function routeMatchesName(r,n){ n=String(n||'').toLowerCase(); if(!n) return false;
   if((r.name||'').toLowerCase()===n) return true; return (r.aliases||[]).some(function(a){ return String(a).toLowerCase()===n; }); }
+// When several routes share a name/alias, prefer the most complete (pickup > dropoff)
+function findBestRoute(name){
+  var matches=routes.filter(function(r){ return routeMatchesName(r, name); });
+  if(!matches.length) return null;
+  return matches.sort(function(a,b){
+    var sa=(a.pickup&&a.pickup.lat?2:0)+(a.dropoff&&a.dropoff.lat?1:0);
+    var sb=(b.pickup&&b.pickup.lat?2:0)+(b.dropoff&&b.dropoff.lat?1:0);
+    return sb-sa;
+  })[0];
+}
 </script>
 </body>
 </html>
