@@ -366,12 +366,16 @@ function geocodeThenPreview(q, target){
   }).catch(function(e){ toast('could not find: '+e.message); if(addrTarget==='pickup') goPickup(); else goWhere(); });
 }
 function useCurrentLocation(){
-  if(!navigator.geolocation){ toast('no GPS on this device'); return; }
+  if(!navigator.geolocation){ toast('GPS unsupported here'); return; }
+  if(!window.isSecureContext){ toast('GPS needs https'); return; }
   navigator.geolocation.getCurrentPosition(function(pos){
     nominatimReverse(pos.coords.latitude, pos.coords.longitude).then(function(addr){
       intake.pickup={lat:pos.coords.latitude,lng:pos.coords.longitude,addr:addr||'current location'}; toast('pickup set'); renderPickup();
     }).catch(function(){ intake.pickup={lat:pos.coords.latitude,lng:pos.coords.longitude,addr:'current location'}; renderPickup(); });
-  }, function(){ toast('GPS denied'); });
+  }, function(err){
+    var why = err && err.code===1 ? 'GPS permission denied' : err && err.code===2 ? 'GPS unavailable' : err && err.code===3 ? 'GPS timeout' : 'GPS denied';
+    toast(why); if(typeof DEBUG!=='undefined' && DEBUG) console.log('GPS', err && err.code, err && err.message);
+  });
 }
 function renderAddrPreview(){
   var addLabel = addrTarget==='pickup' ? 'Set pickup' : 'Add stop';
