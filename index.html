@@ -155,8 +155,7 @@
 <script src="qrcode.js"></script>
 <script>
 var HAS = { msg: typeof PluginMessageHandler !== 'undefined', store: !!(window.creationStorage && window.creationStorage.plain) };
-var BACKEND = location.origin;
-var routes = [], CLIENT_ID = '';
+var routes = [], CLIENT_ID = '';   // fully client-side now: no backend
 var intake = { riderType:'me', rider:null, stops:[], when:null, pickup:null };
 var expect = null, pendingStop = null, addrTarget = 'stop';
 
@@ -175,15 +174,27 @@ function ensureVis(){ var e=selItems[sel]; if(e && e.scrollIntoView) e.scrollInt
 function activate(){ var e=selItems[sel]; if(e) e.click(); }
 function visId(){ var v=document.querySelector('.screen[style*="flex"]'); return v?v.id:null; }
 
-// ---------- storage ----------
+// ---------- storage (client-side, no backend) ----------
 function loadRoutes(){ if(!HAS.store) return Promise.resolve();
   return window.creationStorage.plain.getItem('routes').then(function(b){ if(b){try{routes=JSON.parse(atob(b));}catch(e){}} }); }
-function syncFromBackend(){
-  return fetch(BACKEND+'/config').then(function(r){return r.json();}).then(function(c){ CLIENT_ID=c.clientId||''; document.getElementById('modeDot').classList.remove('off'); })
-    .catch(function(){ document.getElementById('modeDot').classList.add('off'); })
-    .then(function(){ return fetch(BACKEND+'/routes'); }).then(function(r){return r.json();}).then(function(d){
-      routes=d.routes||[]; if(HAS.store) window.creationStorage.plain.setItem('routes',btoa(JSON.stringify(routes)));
-    }).catch(function(){});
+function saveRoutes(){ if(!HAS.store) return; window.creationStorage.plain.setItem('routes',btoa(JSON.stringify(routes))); }
+
+// ---------- geocode via Nominatim (direct, no key, CORS-enabled) ----------
+function nominatimGeocode(q){
+  var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=' + encodeURIComponent(q);
+  return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(r){return r.json();}).then(function(j){
+    if(!j || !j.length) throw new Error('no match');
+    var hit=j[0];
+    var confident = !!(hit.address && hit.address.house_number) || parseFloat(hit.importance||0) > 0.6;
+    return { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon), addr: hit.display_name, confident: confident };
+  });
+}
+function nominatimReverse(lat, lng){
+  var url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng);
+  return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(r){return r.json();}).then(function(j){
+    if(!j || !j.display_name) throw new Error('no match');
+    return j.display_name;
+  });
 }
 
 // ---------- station builder ----------
@@ -292,16 +303,18 @@ function typeAddrGo(){ var v=document.getElementById('addrInput').value.trim(); 
 function sayAddress(){ expect='address'; if(!HAS.msg){ var a=prompt('Address:'); if(a) geocodeThenPreview(a,'stop'); return; } toast('speak the address…');
   PluginMessageHandler.postMessage(JSON.stringify({ message:"The user is about to say a destination. Reply with ONLY the raw address text they say, nothing else.", useLLM:true, wantsR1Response:false })); }
 function geocodeThenPreview(q, target){
-  fetch(BACKEND+'/geocode?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(j){
-    if(j.error) throw new Error(j.error);
-    pendingStop={lat:j.lat,lng:j.lng,addr:(j.addr||q)}; addrTarget=target||'stop'; renderAddrPreview();
-  }).catch(function(e){ toast('could not find: '+e.message); if(target==='pickup') goPickup(); else goWhere(); });
+  addrTarget=target||'stop';
+  nominatimGeocode(q).then(function(j){
+    pendingStop={lat:j.lat,lng:j.lng,addr:(j.addr||q)};
+    if(j.confident){ addrConfirm(); }          // exact match: skip the preview, just add it
+    else { renderAddrPreview(); }               // fuzzy match: show "Did you mean"
+  }).catch(function(e){ toast('could not find: '+e.message); if(addrTarget==='pickup') goPickup(); else goWhere(); });
 }
 function useCurrentLocation(){
   if(!navigator.geolocation){ toast('no GPS on this device'); return; }
   navigator.geolocation.getCurrentPosition(function(pos){
-    fetch(BACKEND+'/reverse-geocode?lat='+pos.coords.latitude+'&lng='+pos.coords.longitude).then(function(r){return r.json();}).then(function(j){
-      intake.pickup={lat:pos.coords.latitude,lng:pos.coords.longitude,addr:j.addr||'current location'}; toast('pickup set'); renderPickup();
+    nominatimReverse(pos.coords.latitude, pos.coords.longitude).then(function(addr){
+      intake.pickup={lat:pos.coords.latitude,lng:pos.coords.longitude,addr:addr||'current location'}; toast('pickup set'); renderPickup();
     }).catch(function(){ intake.pickup={lat:pos.coords.latitude,lng:pos.coords.longitude,addr:'current location'}; renderPickup(); });
   }, function(){ toast('GPS denied'); });
 }
@@ -323,9 +336,7 @@ function savePrompt(){
   var aliases=aliasStr.split(',').map(function(s){return s.trim();}).filter(Boolean);
   var route={ name:name.trim(), aliases:aliases, dropoff:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr},
     pickup:(intake.pickup&&intake.pickup.lat)?{lat:intake.pickup.lat,lng:intake.pickup.lng,addr:intake.pickup.addr}:null };
-  fetch(BACKEND+'/routes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({route:route})})
-    .then(function(r){return r.json();}).then(function(d){ routes=d.routes||routes; if(HAS.store) window.creationStorage.plain.setItem('routes',btoa(JSON.stringify(routes))); toast('saved '+name); })
-    .catch(function(){ toast('save failed (offline)'); });
+  routes.push(route); saveRoutes(); toast('saved '+name);
   addrConfirm();
 }
 
@@ -449,7 +460,7 @@ document.addEventListener('keydown', function(e){
 document.getElementById('addrInput').addEventListener('keydown', function(e){ if(e.key==='Enter'){ typeAddrGo(); e.preventDefault(); } });
 
 // ---------- boot ----------
-function boot(){ syncFromBackend().then(loadRoutes).then(function(){ routes=routes||[]; renderHome(); show('home'); }); }
+function boot(){ loadRoutes().then(function(){ routes=routes||[]; renderHome(); show('home'); }); }
 boot();
 
 // ---------- utils ----------
