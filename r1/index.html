@@ -323,6 +323,7 @@ function show(id){
   if(id!=='home' && WIZ.indexOf(id)>=0) setProg(WIZ.indexOf(id));
   if(id==='home'){ renderHome(); }   // re-render + re-register selection model (was clearing selItems, breaking scroll/PTT)
   if(id==='typeAddr'){ renderTypeAddr(); }
+  if(_dbgPush) _dbgPush('→ '+id);   // on-screen #debug: confirm the screen actually switched
 }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.display='block';
   clearTimeout(toast._t); toast._t=setTimeout(function(){t.style.display='none';},2200); }
@@ -614,7 +615,13 @@ function goForward(){ var v=visId();
 
 // ---------- hardware + gestures ----------
 var DEBUG = /[#&?]debug/.test(location.href);
+var _dbgPush = null;
 if(DEBUG){
+  var dbg = document.createElement('div');
+  dbg.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;font:9px monospace;color:#0f0;background:rgba(0,0,0,.6);padding:1px 3px;white-space:nowrap;overflow:hidden;';
+  document.body.appendChild(dbg);
+  var _dbgLog = [];
+  _dbgPush = function(s){ _dbgLog.push(s); if(_dbgLog.length>4) _dbgLog.shift(); dbg.textContent = '['+(curScreen||'?')+'] '+_dbgLog.join(' · '); };
   ['scrollUp','scrollDown','scrollWheel','sideClick','sideButton','longPressStart','longPressEnd','click','touchend','keydown','wheel'].forEach(function(ev){
     window.addEventListener(ev, function(e){
       var extra = e && e.key!==undefined ? e.key
@@ -622,11 +629,12 @@ if(DEBUG){
                  : e && e.detail!==undefined ? JSON.stringify(e.detail)
                  : '';
       console.log('EVT', ev, extra);
+      if(_dbgPush) _dbgPush('EVT '+ev+(extra?(' '+extra):''));
     });
   });
-  window.addEventListener('error', function(e){ console.log('ERR', e.message); });
+  window.addEventListener('error', function(e){ console.log('ERR', e.message); if(_dbgPush) _dbgPush('ERR '+e.message); });
 }
-// debounce so a single physical scroll can't trigger two moves via duplicate synthetic events
+
 var _lastMove = 0;
 function moveSelDebounced(d){ var now=Date.now(); if(now-_lastMove<120) return; _lastMove=now; moveSel(d); }
 function sideClickHandler(){ var v=visId();
