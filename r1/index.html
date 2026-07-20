@@ -23,23 +23,44 @@
 <link rel="icon" type="image/png" href="icon.png">
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; }
+  /* one restrained signature accent (a muted brass/gold) used only where color carries meaning --
+     "in progress" / "active" states -- instead of the previous bright saturated yellow used as
+     plain decoration. Everything else stays neutral so the accent actually reads as a signal. */
+  :root { --gold:#C9A458; --gold-dim:#8a7038; --blue:#5a7bab; }
   html,body { width:240px; height:282px; overflow:hidden; background:#000; color:#fff;
     font-family:Helvetica,Arial,sans-serif; font-size:13px; font-weight:bold; letter-spacing:.02em; }
-  /* faint diagonal hatch so pure black doesn't read as flat/dead under bright light --
-     static background-image, zero runtime cost, no animation */
-  #app { width:240px; height:282px; display:flex; flex-direction:column; position:relative;
-    background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.035) 0px, rgba(255,255,255,.035) 1px, transparent 1px, transparent 7px); }
+  #app { width:240px; height:282px; display:flex; flex-direction:column; position:relative; background:#000; }
+  /* animated subway-map background: a few route lines with a light "train" traveling each one.
+     SMIL animateMotion on a handful of small circles -- cheap (tiny elements, slow, no JS/layout
+     churn) and reads as an actual live transit map instead of a flat texture. */
+  #bgLines { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; }
+  #bgLines .rl { fill:none; stroke-width:2; stroke-linecap:round; }
+  #bgLines .rl.c0 { stroke:#4a6b8a; opacity:.22; }
+  #bgLines .rl.c1 { stroke:#5c7a94; opacity:.16; }
+  #bgLines .rl.c2 { stroke:#3d5670; opacity:.20; }
+  #bgLines .rd.c0 { fill:#7c9cb8; filter:drop-shadow(0 0 2px rgba(124,156,184,.5)); }
+  #bgLines .rd.c1 { fill:#8fa8bd; filter:drop-shadow(0 0 2px rgba(143,168,189,.4)); }
+  #bgLines .rd.c2 { fill:#6b8aa8; filter:drop-shadow(0 0 2px rgba(107,138,168,.5)); }
   /* ---- header: station sign ---- */
-  header { height:22px; flex-shrink:0; display:flex; align-items:center; justify-content:space-between;
-    padding:0 8px; background:#0a0a0a; border-bottom:3px solid #FCCC0A; }
-  header .sign { font-size:12px; letter-spacing:.12em; color:#fff; }
-  header .dot { width:7px; height:7px; border-radius:50%; background:#3ddc84; }
-  header .dot.off { background:#ff5b5b; }
+  header { height:27px; flex-shrink:0; display:flex; align-items:center;
+    padding:0 9px; background:#0a0a0a; border-bottom:1px solid rgba(255,255,255,.12); position:relative; }
+  header .badge { width:17px; height:17px; border-radius:50%; background:#00933C; color:#fff; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; box-shadow:0 0 0 2px #000; margin-right:7px; }
+  /* while a geocode request is in flight, the app's own icon does the "thinking" -- flashes
+     between its normal green and the app's blue accent instead of a separate floating spinner */
+  body.loading header .badge { animation: badgeThink .9s ease-in-out infinite; }
+  @keyframes badgeThink { 0%,100% { background:#00933C; } 50% { background:var(--blue); } }
+  header .sign { font-size:12px; letter-spacing:.14em; color:#fff; display:flex; align-items:center; text-shadow:0 0 6px rgba(255,255,255,.25); }
   /* ---- progress transit line ---- */
   .prog { height:16px; flex-shrink:0; display:flex; align-items:center; padding:0 10px; background:#0a0a0a;
     border-bottom:1px solid #161616; gap:0; overflow:hidden; position:relative; }
-  .trainDot { position:absolute; top:50%; left:0; width:5px; height:5px; border-radius:50%; background:#FCCC0A;
-    box-shadow:0 0 5px 1px rgba(252,204,10,.8); pointer-events:none; z-index:3; }
+  .trainDot { position:absolute; top:50%; left:0; width:5px; height:5px; border-radius:50%; background:var(--gold);
+    box-shadow:0 0 3px 1px rgba(201,164,88,.55); pointer-events:none; z-index:3;
+    animation: trainPulse 1.6s ease-in-out infinite; }
+  /* opacity only, not box-shadow -- box-shadow-size animation repaints every frame, and this
+     element's `transform` is already driven by JS for positioning, so the animation can't touch
+     that property either (a CSS keyframe would fight the inline style and break its position) */
+  @keyframes trainPulse { 0%,100% { opacity:.8; } 50% { opacity:1; } }
   .prog .seg { display:flex; align-items:center; }
   .prog .pd { width:7px; height:7px; border-radius:50%; border:2px solid #444; background:#000; }
   .prog .pd.done { background:#fff; border-color:#fff; }
@@ -47,13 +68,13 @@
   .prog .ln { width:18px; height:2px; background:#444; }
   .prog .ln.done { background:#fff; }
   .prog .pl { font-size:9px; letter-spacing:.08em; color:#888; margin-left:5px; text-transform:uppercase; }
-  .prog .pl.cur { color:#FCCC0A; }
+  .prog .pl.cur { color:var(--gold); }
   /* ---- screens ---- */
-  #view { flex:1; overflow:hidden; position:relative; }
+  #view { flex:1; overflow:hidden; position:relative; touch-action:none; }
   .screen { position:absolute; inset:0; display:flex; flex-direction:column; }
   .list { flex:1; overflow:hidden; position:relative; padding:6px 0 6px 0; }
   /* ---- station row ---- */
-  .row { position:relative; min-height:44px; display:flex; align-items:center; padding:4px 10px 4px 38px; }
+  .row { position:relative; min-height:44px; display:flex; align-items:center; padding:4px 10px 4px 45px; }
   .row::before { content:""; position:absolute; left:21px; top:24px; bottom:0; width:2px; background:#2a2a2a; }
   .row:first-child::before { top:24px; }
   .row:last-child::before { bottom:18px; }
@@ -71,11 +92,17 @@
   .meta { display:flex; flex-direction:column; line-height:1.15; }
   .meta .t { font-size:13px; color:#fff; text-transform:uppercase; letter-spacing:.03em; }
   .meta .s { font-size:10px; color:#8a8a8a; font-weight:400; margin-top:1px; text-transform:none; letter-spacing:0; }
-  .row { transition: background-color 120ms ease, box-shadow 120ms ease; }
-  .row.sel { background:#fff; box-shadow:inset 0 0 0 2px #000, 0 0 0 2px var(--rc,#fff), 0 0 14px -2px var(--rc,#fff); }
+  .row { transition: background-color 120ms ease, box-shadow 120ms ease, transform 60ms ease; }
+  .row:active { transform: scale(.985); }
+  .row.sel { background:#fff; box-shadow:inset 0 0 0 2px #000, 0 0 0 2px var(--rc,#fff), 0 0 6px 1px var(--rc,#fff), 0 0 18px -3px var(--rc,#fff); }
   .row.sel .meta .t { color:#000; }
   .row.sel .meta .s { color:#444; }
-  .row.express .bullet { border-radius:4px; background:#00933C; color:#fff; transform:translateY(-50%) rotate(45deg); }
+  /* hold a saved route on Home to arm it for deletion -- overrides .sel (later in source order,
+     same specificity) since an armed row is also the selected one */
+  .row.armDelete { background:#7a2020; box-shadow:inset 0 0 0 2px #000, 0 0 0 2px #ff5b5b, 0 0 10px -2px #ff5b5b; }
+  .row.armDelete .meta .t, .row.armDelete .meta .s { color:#fff; }
+  .row.express .bullet { border-radius:4px; background:#00933C; color:#fff; transform:translateY(-50%) rotate(45deg);
+    box-shadow:0 0 8px 1px rgba(0,147,60,.45); }
   .row.express .bullet span { transform:rotate(-45deg); }
   .row.disabled .meta .t { color:#555; }
   .row.disabled .bullet { background:#222; color:#555; }
@@ -83,31 +110,57 @@
   .center { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:10px; gap:8px; }
   .big { font-size:15px; text-align:center; line-height:1.25; }
   .muted { font-size:11px; color:#8a8a8a; text-align:center; font-weight:bold; }
-  .ok{color:#3ddc84;} .warn{color:#FCCC0A;} .bad{color:#ff5b5b;}
+  .ok{color:#3ddc84;} .warn{color:var(--gold);} .bad{color:#ff5b5b;}
   .pill { display:inline-block; font-size:10px; padding:1px 6px; border-radius:999px; background:#1d1d1d; color:#bbb; margin:2px; font-weight:bold; }
-  #qr { width:150px; height:150px; background:#fff; border-radius:4px; padding:6px; }
+  #qr { width:150px; height:150px; background:#fff; border-radius:4px; padding:6px; box-shadow:0 0 20px rgba(255,255,255,.08); }
   #qr img, #qr canvas { width:138px; height:138px; display:block; }
   .marquee { width:100%; height:20px; overflow:hidden; white-space:nowrap; text-align:center; flex-shrink:0; }
   .marquee .big { display:inline-block; white-space:nowrap; line-height:20px; }
-  .marquee.scroll .big { animation: slide 6s ease-in-out infinite alternate; }
+  .marquee.scroll .big { animation: slide 6s ease-in-out infinite alternate; text-shadow:0 0 8px rgba(255,255,255,.35); }
   @keyframes slide { from { transform:translateX(0); } to { transform:translateX(var(--sd,0px)); } }
   .field { margin:8px 10px; }
   .field input { width:100%; padding:10px; border:1px solid #2a2a2a; border-radius:6px; background:#0a0a0a;
     color:#fff; font:bold 13px Helvetica,Arial; box-sizing:border-box; -webkit-user-select:text; user-select:text; }
   .tip { height:14px; flex-shrink:0; text-align:center; font-size:9px; letter-spacing:.06em; color:#666;
     background:#0a0a0a; border-top:1px solid #161616; text-transform:uppercase; line-height:14px; }
-  .toast { position:absolute; left:0; right:0; bottom:18px; padding:7px; background:#FCCC0A; color:#000;
+  .toast { position:absolute; left:0; right:0; bottom:18px; padding:7px; background:var(--gold); color:#000;
     font-size:11px; text-align:center; font-weight:bold; }
-  .loading::after { content:''; position:fixed; top:50%; left:50%; width:8px; height:8px; border-radius:50%;
-    background:#FCCC0A; animation:pulse 1s ease-in-out infinite; z-index:200; transform:translate(-50%,-50%); }
-  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
   .poster { padding:10px; text-align:center; }
   .poster .lbl { font-size:10px; color:#8a8a8a; letter-spacing:.1em; text-transform:uppercase; }
+  /* ---- route preview: a stylized (not literal-cartography) line diagram, in the app's own
+     subway-map language, plotted from the ride's real coordinates -- shown on Confirm before
+     the QR so you can see the shape of the trip, not just read the address ---- */
+  #routeMapWrap { width:100%; max-width:200px; flex-shrink:0; }
+  #routeMap { width:100%; height:76px; display:block; }
+  #routeMap .rmLine { fill:none; stroke:#fff; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-opacity:.5;
+    filter:drop-shadow(0 0 2px rgba(255,255,255,.25)); }
+  #routeMap .rmLine.dashed { stroke-dasharray:3,3; stroke-opacity:.32; }
+  #routeMap .rmPt { stroke:#000; stroke-width:1.5; }
+  #routeMap .rmPt.pickup { fill:#5f9e73; filter:drop-shadow(0 0 2px rgba(95,158,115,.4)); }
+  #routeMap .rmPt.stop { fill:#8a8a8a; }
+  #routeMap .rmPt.dest { fill:var(--blue); filter:drop-shadow(0 0 2px rgba(90,123,171,.4)); }
+  #routeMap .rmPt.unknown { fill:#000; stroke:#555; stroke-dasharray:1.5,1.5; }
+  #routeMap .rmLbl { font-family:Helvetica,Arial,sans-serif; font-size:7.5px; font-weight:bold;
+    fill:#b7b7b7; letter-spacing:.02em; text-transform:uppercase; }
 </style>
 </head>
 <body>
 <div id="app">
-  <header><span class="sign">UBER ROUTES</span><span class="dot" id="modeDot"></span></header>
+  <svg id="bgLines" viewBox="0 0 240 282" preserveAspectRatio="none" aria-hidden="true">
+    <path class="rl c0" d="M -20,230 C 60,180 90,80 260,20" />
+    <path class="rl c1" d="M -20,20 C 70,60 130,220 260,260" />
+    <path class="rl c2" d="M -20,150 C 90,90 130,200 260,140" />
+    <circle class="rd c0" r="3.2">
+      <animateMotion dur="9s" repeatCount="indefinite" path="M -20,230 C 60,180 90,80 260,20" />
+    </circle>
+    <circle class="rd c1" r="3.2">
+      <animateMotion dur="11s" repeatCount="indefinite" path="M -20,20 C 70,60 130,220 260,260" />
+    </circle>
+    <circle class="rd c2" r="3.2">
+      <animateMotion dur="8s" repeatCount="indefinite" path="M -20,150 C 90,90 130,200 260,140" />
+    </circle>
+  </svg>
+  <header><span class="badge">U</span><span class="sign">UBER ROUTES</span></header>
   <div id="view">
 
     <!-- HOME -->
@@ -154,9 +207,10 @@
       <div class="center poster">
         <div class="lbl">Take me to</div>
         <div class="marquee" id="confirmAddrWrap"><div class="big" id="confirmAddr"></div></div>
+        <div id="routeMapWrap"><svg id="routeMap" viewBox="0 0 200 76"></svg></div>
         <div class="muted" id="confirmFrom"></div>
       </div>
-      <div class="row express" id="confirmReq" style="padding-left:38px">
+      <div class="row express" id="confirmReq" style="padding-left:45px">
         <span class="bullet"><span>→</span></span>
         <div class="meta"><div class="t">Request</div><div class="s">press ●</div></div>
       </div>
@@ -203,9 +257,12 @@ function bulletColor(c){ return BLACK_TXT[c] ? '#000' : '#fff'; }
 
 // ---------- selection / scroll model ----------
 var selItems = [], sel = 0;
-function registerList(els){ selItems = Array.prototype.slice.call(els||[]); sel = 0; paint(); ensureVis(); }
+function registerList(els, keepSel){ var prevSel=sel; selItems = Array.prototype.slice.call(els||[]);
+  sel = keepSel ? Math.max(0, Math.min(prevSel, selItems.length-1)) : 0; paint(); ensureVis(); }
 function paint(){ selItems.forEach(function(e,i){ e.classList.toggle('sel', i===sel); }); }
-function moveSel(d){ if(!selItems.length) return; sel += d; if(sel<0) sel=selItems.length-1; if(sel>=selItems.length) sel=0; paint(); ensureVis(); }
+function moveSel(d){ if(!selItems.length) return;
+  if(armedRouteIdx>=0){ armedRouteIdx=-1; if(curScreen==='home') renderHome(true); }   // scrolling away cancels a pending delete
+  sel += d; if(sel<0) sel=selItems.length-1; if(sel>=selItems.length) sel=0; paint(); ensureVis(); }
 function ensureVis(){ var e=selItems[sel]; if(!e) return;
   var list=e.closest ? e.closest('.list') : (e.parentNode && e.parentNode.classList && e.parentNode.classList.contains('list') ? e.parentNode : null);
   if(!list) return;
@@ -222,7 +279,7 @@ function safeStore(key, val){ if(!HAS.store) return Promise.resolve();
 function safeLoad(key){ if(!HAS.store) return Promise.resolve(null);
   return window.creationStorage.plain.getItem(key).catch(function(e){ console.warn('storage fail:',e); return null; }); }
 function loadRoutes(){ return safeLoad('routes').then(function(b){ if(b){try{routes=JSON.parse(atob(b));}catch(e){}} return; }); }
-function saveRoutes(){ if(!HAS.store) return; safeStore('routes', btoa(JSON.stringify(routes))); }
+function saveRoutes(){ if(!HAS.store) return Promise.resolve(); return safeStore('routes', btoa(JSON.stringify(routes))); }
 
 // ---------- geocode via Nominatim (direct, no key, CORS-enabled) ----------
 function fetchWithTimeout(url, opts, ms){
@@ -237,23 +294,13 @@ function nominatimGeocode(q){
       if(!j || !j.length) throw new Error('no match');
       var hit=j[0];
       var confident = !!(hit.address && hit.address.house_number) || parseFloat(hit.importance||0) > 0.6;
-      return { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon), addr: hit.display_name, confident: confident };
+      var a=hit.address||{};
+      var place = a.city || a.town || a.village || a.hamlet || a.suburb || null;   // for route-map reference labels
+      return { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon), addr: hit.display_name, confident: confident, place: place };
     })
     .then(function(res){ document.body.classList.remove('loading'); return res; })
     .catch(function(e){ document.body.classList.remove('loading'); throw e; });
 }
-function nominatimReverse(lat, lng){
-  document.body.classList.add('loading');
-  var url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng);
-  return fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 8000)
-    .then(function(r){ return r.json(); }).then(function(j){
-      if(!j || !j.display_name) throw new Error('no match');
-      return j.display_name;
-    })
-    .then(function(res){ document.body.classList.remove('loading'); return res; })
-    .catch(function(e){ document.body.classList.remove('loading'); throw e; });
-}
-
 // ---------- station builder ----------
 function station(o){
   var d=document.createElement('div'); d.className='row'+(o.express?' express':'')+(o.disabled?' disabled':'');
@@ -346,9 +393,9 @@ function setProg(idx){
   var pds=host.querySelectorAll('.pd');
   var curPd=pds[idx], fromPd=pds[Math.max(0,idx-1)];
   if(curPd){
-    var hostRect=host.getBoundingClientRect();
-    var toX=curPd.getBoundingClientRect().left-hostRect.left+curPd.offsetWidth/2;
-    var fromX=(idx===0)?toX:(fromPd.getBoundingClientRect().left-hostRect.left+fromPd.offsetWidth/2);
+    var hostRect=host.getBoundingClientRect(); var half=dot.offsetWidth/2;
+    var toX=curPd.getBoundingClientRect().left-hostRect.left+curPd.offsetWidth/2-half;
+    var fromX=(idx===0)?toX:(fromPd.getBoundingClientRect().left-hostRect.left+fromPd.offsetWidth/2-half);
     dot.style.transition='none';
     dot.style.transform='translate('+fromX+'px,-50%)';
     requestAnimationFrame(function(){
@@ -362,19 +409,37 @@ function setProg(idx){
 
 // ---------- HOME ----------
 function homeRoute(){ return routes.find(function(r){return routeMatchesName(r,'home');}) || null; }
-function renderHome(){
+// hold a saved route on Home to arm it for deletion (row turns red, subtitle prompts for the
+// side button); scrolling away or navigating off Home cancels it -- see longPressStart/moveSel
+var armedRouteIdx = -1;
+function deleteArmedRoute(){
+  var idx=armedRouteIdx; armedRouteIdx=-1;
+  if(idx<0 || idx>=routes.length){ renderHome(true); return; }
+  var name=routes[idx].name;
+  routes.splice(idx,1);
+  renderHome(true);
+  saveRoutes().then(function(){ toast('deleted '+name); });
+}
+function renderHome(keepSel){
+  if(!keepSel) armedRouteIdx=-1;   // fresh entry to Home always clears any stale armed state
   var el=document.getElementById('homeList'); el.innerHTML='';
   // voice shortcut
   el.appendChild(station({ letter:'V', color:'#B933AD', title:'Say a ride', sub:'speak a saved place', onClick:function(){ sayPhrase(); } }));
   routes.forEach(function(r,i){
-    el.appendChild(station({ letter:(r.name||'?').charAt(0).toUpperCase(), color:routeColor(i), title:r.name,
-      sub:shortAddr(r.dropoff.addr), onClick:function(){ quickSelf(r); } }));
+    if(!r.dropoff || !r.dropoff.lat) return;   // pickup-only saves have nowhere to quick-ride to
+    var armed = i===armedRouteIdx;
+    var row=station({ letter:(r.name||'?').charAt(0).toUpperCase(), color:routeColor(i), title:r.name,
+      sub: armed ? 'press ● to delete' : shortAddr(r.dropoff.addr),
+      onClick:function(){ if(i===armedRouteIdx) deleteArmedRoute(); else quickSelf(r); } });
+    row.dataset.routeIdx = i;
+    if(armed) row.classList.add('armDelete');
+    el.appendChild(row);
   });
   el.appendChild(station({ letter:'+', color:'#00933C', title:'New ride', express:true, onClick:function(){ startWizard(); } }));
   var trail=document.createElement('div'); trail.className='lineTrail';
   trail.innerHTML='<div class="td t1"></div><div class="td t2"></div><div class="td t3"></div>';
   el.appendChild(trail);
-  registerList(collect(el));
+  registerList(collect(el), keepSel);
 }
 function quickSelf(r){
   intake={ riderType:'me', rider:null, stops:[{lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}],
@@ -389,10 +454,9 @@ function renderPickup(){
   var el=document.getElementById('pickupList'); el.innerHTML='';
   if(intake.pickup){ el.appendChild(station({ letter:'×', color:'#ff5b5b', title:'Clear pickup', sub:shortAddr(intake.pickup.addr),
     onClick:function(){ intake.pickup=null; renderPickup(); } })); }
-  el.appendChild(station({ letter:'◉', color:'#00933C', title:'Current location', sub:'use my GPS', onClick:function(){ useCurrentLocation(); } }));
   routes.forEach(function(r){
     if(r.pickup && r.pickup.lat) el.appendChild(station({ letter:(r.name||'?').charAt(0).toUpperCase(), color:routeColor(routes.indexOf(r)), title:r.name,
-      sub:'saved pickup', onClick:function(){ intake.pickup={lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}; renderPickup(); } }));
+      sub:'saved pickup', onClick:function(){ intake.pickup={lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr,place:r.pickup.place}; renderPickup(); } }));
   });
   if(intake.pickup){ el.appendChild(station({ letter:'S', color:'#2850AD', title:'Save pickup', sub:shortAddr(intake.pickup.addr), onClick:function(){ savePrompt('pickup'); } })); }
   el.appendChild(station({ letter:'T', title:'Type address', onClick:function(){ document.getElementById('addrInput').value=''; addrTarget='pickup'; show('typeAddr'); } }));
@@ -422,8 +486,11 @@ function renderStops(){
 function pickRoute(){
   var el=document.getElementById('stopList'); el.innerHTML='';
   var back=station({ letter:'⟵', title:'Back to stops', onClick:function(){ renderStops(); } }); el.appendChild(back);
-  routes.forEach(function(r){ el.appendChild(station({ letter:(r.name||'?').charAt(0).toUpperCase(), color:routeColor(routes.indexOf(r)), title:r.name,
-    sub:shortAddr(r.dropoff.addr), onClick:function(){ intake.stops.push({lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}); renderStops(); } })); });
+  routes.forEach(function(r){
+    if(!r.dropoff || !r.dropoff.lat) return;   // pickup-only saves have no destination to add as a stop
+    el.appendChild(station({ letter:(r.name||'?').charAt(0).toUpperCase(), color:routeColor(routes.indexOf(r)), title:r.name,
+      sub:shortAddr(r.dropoff.addr), onClick:function(){ intake.stops.push({lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr,place:r.dropoff.place}); renderStops(); } }));
+  });
   registerList(collect(el));
 }
 
@@ -437,7 +504,7 @@ function sayAddress(){ expect='address'; if(!HAS.msg){ showPrompt('Destination',
 function geocodeThenPreview(q, target){
   addrTarget=target||'stop';
   nominatimGeocode(q).then(function(j){
-    pendingStop={lat:j.lat,lng:j.lng,addr:(j.addr||q)};
+    pendingStop={lat:j.lat,lng:j.lng,addr:(j.addr||q),place:j.place};
     renderAddrPreview();   // always show "Did you mean" + Save address (so saving works for every address, exact or fuzzy)
     show('addrPreview');   // BUG FIX: renderAddrPreview() only populated the screen's content and
                             // selection model -- it never actually switched the visible screen. The
@@ -447,18 +514,6 @@ function geocodeThenPreview(q, target){
                             // the confirm button / PTT did nothing. This was the real bug behind the
                             // "PTT doesn't work" report -- nothing to do with hardware event names.
   }).catch(function(e){ toast('could not find: '+e.message); if(addrTarget==='pickup') goPickup(); else goWhere(); });
-}
-function useCurrentLocation(){
-  if(!navigator.geolocation){ toast('GPS unsupported here'); return; }
-  if(!window.isSecureContext){ toast('GPS needs https'); return; }
-  navigator.geolocation.getCurrentPosition(function(pos){
-    nominatimReverse(pos.coords.latitude, pos.coords.longitude).then(function(addr){
-      intake.pickup={lat:pos.coords.latitude,lng:pos.coords.longitude,addr:addr||'current location'}; toast('pickup set'); renderPickup();
-    }).catch(function(){ intake.pickup={lat:pos.coords.latitude,lng:pos.coords.longitude,addr:'current location'}; renderPickup(); });
-  }, function(err){
-    var why = err && err.code===1 ? 'GPS permission denied' : err && err.code===2 ? 'GPS unavailable' : err && err.code===3 ? 'GPS timeout' : 'GPS denied';
-    toast(why + ' · use Type/Say'); if(typeof DEBUG!=='undefined' && DEBUG) console.log('GPS', err && err.code, err && err.message);
-  });
 }
 function renderAddrPreview(){
   var addLabel = addrTarget==='pickup' ? 'Set pickup' : 'Add stop';
@@ -475,36 +530,29 @@ function savePrompt(mode){
   if(!pendingStop) return;
   mode = mode || addrTarget;   // 'pickup' or 'stop'
   showPrompt('Save as', 'Name this route', function(name){
-    showPrompt('Aliases', 'Other names? (comma-separated, optional)', function(aliasStr){
-      name=name.trim();
-      if(!name){ if(mode==='pickup') goPickup(); else goWhere(); return; }
-      var aliases=(aliasStr||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
-      var route;
-      if(mode==='pickup'){
-        route={ name:name, aliases:aliases,
-          dropoff:(intake.stops.length?intake.stops[0]:null) && intake.stops[0].lat ? {lat:intake.stops[0].lat,lng:intake.stops[0].lng,addr:intake.stops[0].addr} : null,
-          pickup:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr} };
-      } else {
-        route={ name:name, aliases:aliases,
-          dropoff:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr},
-          pickup:(intake.pickup&&intake.pickup.lat)?{lat:intake.pickup.lat,lng:intake.pickup.lng,addr:intake.pickup.addr}:null };
-      }
-      // Dedupe: update an existing route with the same name/alias instead of creating a twin
-      var existing=findBestRoute(name);
-      if(existing){
-        var idx=routes.indexOf(existing);
-        route.aliases=route.aliases.concat(existing.aliases.filter(function(a){return route.aliases.indexOf(a)<0;}));
-        routes[idx]=route;
-      } else {
-        routes.push(route);
-      }
-      saveRoutes(); toast('saved '+name);
+    name=name.trim();
+    if(!name){ if(mode==='pickup') goPickup(); else goWhere(); return; }
+    var route;
+    if(mode==='pickup'){
+      route={ name:name,
+        dropoff:(intake.stops.length?intake.stops[0]:null) && intake.stops[0].lat ? {lat:intake.stops[0].lat,lng:intake.stops[0].lng,addr:intake.stops[0].addr,place:intake.stops[0].place} : null,
+        pickup:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr,place:pendingStop.place} };
+    } else {
+      route={ name:name,
+        dropoff:{lat:pendingStop.lat,lng:pendingStop.lng,addr:pendingStop.addr,place:pendingStop.place},
+        pickup:(intake.pickup&&intake.pickup.lat)?{lat:intake.pickup.lat,lng:intake.pickup.lng,addr:intake.pickup.addr,place:intake.pickup.place}:null };
+    }
+    // Dedupe: update an existing route with the same name instead of creating a twin
+    var existing=findBestRoute(name);
+    if(existing){ routes[routes.indexOf(existing)]=route; } else { routes.push(route); }
+    saveRoutes().then(function(){
+      toast('saved '+name);
       var ret=saveReturn; saveReturn=null;
       if(ret){ ret(); return; }
       // return to the screen that launched the save
       if(mode==='pickup'){ intake.pickup=pendingStop; goWhere(); }
       else { addrConfirm(); }
-    }, 'promptModal');
+    });
   }, mode==='pickup'?'pickup':'where');
 }
 
@@ -522,8 +570,8 @@ function confirmPrompt(){
   var val=document.getElementById('promptInput').value.trim();
   var cb=promptCallback, back=promptBackTo;
   promptCallback=null; promptBackTo=null;
-  // an empty value is a legitimate answer (e.g. the optional Aliases field) -- each callback
-  // decides what "" means for its own field, so only fall back to cancel when there's no callback at all
+  // an empty value is a legitimate answer for some fields -- each callback decides what ""
+  // means for its own field, so only fall back to cancel when there's no callback at all
   if(cb) cb(val);
   else if(back) show(back);
 }
@@ -532,8 +580,9 @@ function confirmPrompt(){
 function goConfirm(){
   if(!intake.stops.length){ toast('add a destination (or skip)'); show('where'); return; }
   var dest=intake.stops[intake.stops.length-1].addr;
-  document.getElementById('confirmAddr').textContent=dest;
+  document.getElementById('confirmAddr').textContent=shortAddr(dest);
   document.getElementById('confirmFrom').textContent = intake.pickup ? 'From: '+shortAddr(intake.pickup.addr) : 'From: my location';
+  renderRouteMap();
   var req=document.getElementById('confirmReq');
   show('confirm'); registerList([req]);
   // fitMarquee MUST run after show(): scrollWidth reads 0 on a display:none element, so
@@ -541,10 +590,56 @@ function goConfirm(){
   // (confirmed: long addresses were truncated with no way to read the rest).
   fitMarquee(document.getElementById('confirmAddrWrap'), document.getElementById('confirmAddr'));
 }
+// ---------- route preview (stylized line diagram, not a literal map) ----------
+function renderRouteMap(){
+  var svg=document.getElementById('routeMap');
+  var hasPickup=!!(intake.pickup && intake.pickup.lat);
+  var pts=[];
+  if(hasPickup) pts.push({lat:intake.pickup.lat, lng:intake.pickup.lng, place:intake.pickup.place});
+  intake.stops.forEach(function(s){ pts.push({lat:s.lat, lng:s.lng, place:s.place}); });
+  if(!pts.length){ svg.innerHTML=''; return; }
+  var W=200, H=76, PAD=9;
+  var xs=pts.map(function(p){return p.lng;}), ys=pts.map(function(p){return p.lat;});
+  var minX=Math.min.apply(null,xs), maxX=Math.max.apply(null,xs);
+  var minY=Math.min.apply(null,ys), maxY=Math.max.apply(null,ys);
+  var spanX=Math.max(maxX-minX, 1e-4), spanY=Math.max(maxY-minY, 1e-4);
+  // preserve real relative geography (aspect ratio), just scaled to fit -- like a subway map,
+  // schematic in scale/style but not fabricated in direction or shape
+  var scale=Math.min((W-2*PAD)/spanX, (H-2*PAD)/spanY, 4000);
+  var drawW=spanX*scale, drawH=spanY*scale;
+  var offX=(W-drawW)/2, offY=(H-drawH)/2;
+  function project(p){ return {x:offX+(p.lng-minX)*scale, y:offY+(maxY-p.lat)*scale, place:p.place}; }   // invert lat: north is up
+  var coords=pts.map(project);
+  var placeholderStart=false;
+  if(!hasPickup){
+    // no known pickup (GPS unavailable on-device, or skipped) -- anchor a schematic "start" point
+    // near the first stop rather than fabricating a real position, and draw it dashed/unfilled
+    // to signal "approximate" instead of implying false precision
+    var fp=coords[0];
+    coords.unshift({x:Math.max(6, fp.x-38), y:Math.min(H-6, fp.y+16), place:null});
+    placeholderStart=true;
+  }
+  var d=coords.map(function(c,i){ return (i===0?'M':'L')+c.x.toFixed(1)+','+c.y.toFixed(1); }).join(' ');
+  var parts=['<path class="rmLine'+(placeholderStart?' dashed':'')+'" d="'+d+'" />'];
+  coords.forEach(function(c,i){
+    var role = i===coords.length-1 ? 'dest' : (placeholderStart && i===0) ? 'unknown' : (i===0) ? 'pickup' : 'stop';
+    var r = (role==='dest'||role==='pickup') ? 5 : 3;
+    parts.push('<circle class="rmPt '+role+'" cx="'+c.x.toFixed(1)+'" cy="'+c.y.toFixed(1)+'" r="'+r+'" />');
+    // label pickup/destination with their real city/town name, if Nominatim gave us one --
+    // this is what makes the diagram read as an actual place rather than abstract dots
+    if((role==='pickup'||role==='dest') && c.place){
+      var anchor = c.x<50 ? 'start' : c.x>150 ? 'end' : 'middle';
+      var lx = anchor==='start' ? c.x+7 : anchor==='end' ? c.x-7 : c.x;
+      var ly = c.y < H/2 ? c.y+13 : c.y-8;
+      parts.push('<text class="rmLbl" x="'+lx.toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="'+anchor+'">'+esc(c.place)+'</text>');
+    }
+  });
+  svg.innerHTML=parts.join('');
+}
 function selfRide(){ doRequest(); }
 function doRequest(){
   var link=buildSelfLink(intake.stops, intake.pickup);
-  document.getElementById('qrTitle').textContent=intake.stops[intake.stops.length-1].addr;
+  document.getElementById('qrTitle').textContent=shortAddr(intake.stops[intake.stops.length-1].addr);
   var box=document.getElementById('qr'); box.innerHTML='';
   try { var q=window.qrcode(0,'M'); q.addData(link); q.make(); box.innerHTML=q.createImgTag(4,6); } catch(e){ box.innerHTML='<div class="muted" style="color:#000">qr lib missing</div>'; }
   var hr=homeRoute();
@@ -565,7 +660,7 @@ function buildSelfLink(stops, pickup){
   if(CLIENT_ID) u+='&client_id='+CLIENT_ID;
   return u;
 }
-function rideHome(){ var r=homeRoute(); if(!r){ toast('no Home saved'); return; }
+function rideHome(){ var r=homeRoute(); if(!r || !r.dropoff || !r.dropoff.lat){ toast('no Home saved'); return; }
   intake={ riderType:'me', rider:null, stops:[{lat:r.dropoff.lat,lng:r.dropoff.lng,addr:r.dropoff.addr}],
     pickup:(r.pickup&&r.pickup.lat)?{lat:r.pickup.lat,lng:r.pickup.lng,addr:r.pickup.addr}:null }; doRequest(); }
 
@@ -579,7 +674,7 @@ function fitMarquee(wrap, big){
 // ---------- voice phrase shortcut ----------
 function sayPhrase(){ if(!HAS.msg){ showPrompt('Ride', 'Say a ride (e.g. "Home")', function(p){ if(p) askLLM(p); }); return; } toast('speak the ride…'); }
 function askLLM(phrase){ expect='phrase'; if(!HAS.msg){ toast('LLM bridge unavailable'); return; }
-  var known=routes.map(function(r){return [r.name].concat(r.aliases||[]).join('/');}).join(', ');
+  var known=routes.map(function(r){return r.name;}).join(', ');
   var prompt='You are a ride dispatcher. Known routes: '+known+'. Return ONLY JSON: {"route":string|null}. route=null if unknown. Phrase: "'+phrase+'"';
   PluginMessageHandler.postMessage(JSON.stringify({ message:prompt, useLLM:true, wantsR1Response:false })); }
 window.onPluginMessage=function(data){
@@ -646,21 +741,47 @@ window.addEventListener('scrollWheel', function(e){ var d=(e.detail&&e.detail.di
 window.addEventListener('wheel', function(e){ moveSelDebounced(e.deltaY<0?-1:1); }, { passive:true });
 // Side button: listen for both legacy 'sideClick' and SDK 'sideButton'.
 // Guard against double-fire when the host emits both for one physical press.
-var _lastClick = 0;
+var _lastClick = 0, _lastLongPress = 0;
 function _clickGuard(){ var now=Date.now(); if(now-_lastClick<150) return false; _lastClick=now; return true; }
 window.addEventListener('sideClick', function(){ if(_clickGuard()) sideClickHandler(); });
 window.addEventListener('sideButton', function(){ if(_clickGuard()) sideClickHandler(); });
 window.addEventListener('longPressStart', function(){
+  // debounce like sideClick, and also poison the click guard: a long-press that the host
+  // reports as a hold can still arrive alongside a trailing sideClick/sideButton for the same
+  // physical press (release), which would otherwise immediately re-trigger navigation right
+  // after this handler already acted
+  var now=Date.now(); if(now-_lastLongPress<600) return; _lastLongPress=now; _lastClick=now;
   var v=visId();
   if(v==='promptModal'){ if(promptBackTo) show(promptBackTo); return; }
+  if(v==='home'){
+    // hold a saved route to arm it for deletion; holding the same one again cancels it
+    var row=selItems[sel];
+    if(row && row.dataset && row.dataset.routeIdx!==undefined){
+      var idx=+row.dataset.routeIdx;
+      armedRouteIdx = (armedRouteIdx===idx) ? -1 : idx;
+      renderHome(true);
+    }
+    return;
+  }
   if(v==='qrview'){ rideHome(); }
   else if(['pickup','where','confirm','addrPreview','typeAddr'].indexOf(v)>=0){ show('home'); }
 });
-// swipe via pointer events (Android WebView)
-var sx=0, sy=0, sw=false; var view=document.getElementById('view');
-view.addEventListener('pointerdown', function(e){ sx=e.clientX; sy=e.clientY; sw=true; });
-view.addEventListener('pointerup', function(e){ if(!sw) return; sw=false; var dx=e.clientX-sx, dy=e.clientY-sy;
-  if(Math.abs(dx)>40 && Math.abs(dy)<40){ if(dx>0) goBack(); else goForward(); } });
+// swipe: real touch events for the on-device touchscreen (pointer events alone were
+// unreliable in Android WebView -- possibly consumed by the system before pointerup fired),
+// pointer events kept only as a desktop-testing fallback, guarded so a touch never double-fires
+// through both listeners.
+var sx=0, sy=0, sw=false, _lastSwipe=0; var view=document.getElementById('view');
+function swipeStart(x,y){ sx=x; sy=y; sw=true; }
+function swipeEnd(x,y){ if(!sw) return; sw=false; var dx=x-sx, dy=y-sy;
+  if(Math.abs(dx)>40 && Math.abs(dy)<40){
+    var now=Date.now(); if(now-_lastSwipe<300) return; _lastSwipe=now;
+    if(dx>0) goBack(); else goForward();
+  }
+}
+view.addEventListener('touchstart', function(e){ var t=e.touches[0]; if(t) swipeStart(t.clientX,t.clientY); }, { passive:true });
+view.addEventListener('touchend', function(e){ var t=e.changedTouches[0]; if(t) swipeEnd(t.clientX,t.clientY); }, { passive:true });
+view.addEventListener('pointerdown', function(e){ if(e.pointerType==='touch') return; swipeStart(e.clientX,e.clientY); });
+view.addEventListener('pointerup', function(e){ if(e.pointerType==='touch') return; swipeEnd(e.clientX,e.clientY); });
 // desktop keyboard fallback (harmless on device)
 document.addEventListener('keydown', function(e){
   if(document.activeElement && (document.activeElement.id==='addrInput' || document.activeElement.id==='promptInput')) return;
@@ -676,12 +797,19 @@ document.getElementById('promptInput').addEventListener('keydown', function(e){ 
 function boot(){ loadRoutes().then(function(){ routes=routes||[]; renderHome(); show('home'); }); }
 boot();
 
+// pause the background SVG's animateMotion loops while the app isn't visible -- it's a small,
+// cheap animation, but there's no reason to keep it running on a backgrounded/suspended WebView
+document.addEventListener('visibilitychange', function(){
+  var svg=document.getElementById('bgLines'); if(!svg||!svg.pauseAnimations) return;
+  if(document.hidden) svg.pauseAnimations(); else svg.unpauseAnimations();
+});
+
 // ---------- utils ----------
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-function shortAddr(a){ if(!a) return ''; var p=a.split(','); return p.slice(0,2).join(', '); }
+function shortAddr(a){ if(!a) return ''; var p=a.split(',').map(function(s){return s.trim();}); return p.slice(0,2).join(', '); }
 function routeMatchesName(r,n){ n=String(n||'').toLowerCase(); if(!n) return false;
-  if((r.name||'').toLowerCase()===n) return true; return (r.aliases||[]).some(function(a){ return String(a).toLowerCase()===n; }); }
-// When several routes share a name/alias, prefer the most complete (pickup > dropoff)
+  return (r.name||'').toLowerCase()===n; }
+// When several routes share a name, prefer the most complete (pickup > dropoff)
 function findBestRoute(name){
   var matches=routes.filter(function(r){ return routeMatchesName(r, name); });
   if(!matches.length) return null;
